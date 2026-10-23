@@ -6,6 +6,10 @@ Cubase, Studio One, Reaper…).
 
 Everything runs locally in your browser. No upload, no server, no account.
 
+**Want it inside FL Studio?** There is a VST3/AU plugin version in
+[`plugin/`](plugin/README.md): capture the vocal straight from your mixer
+track and drag the MIDI into the playlist.
+
 ## Use it
 
 - **Open `dist/melodylift.html`** in Chrome, Edge, Firefox or Safari. It is a
@@ -73,6 +77,5 @@ Source lives in `src/` (`dsp.js` pitch tracking, `notes.js` transcription,
 
 - Monophonic: it transcribes one melody line (a lead vocal), not chords or
   harmonies sung together.
-- It is a web app, not a VST3/AU plugin yet. The DSP core is plain
-  dependency-free code designed so it can be ported to a JUCE (C++) plugin
-  that runs inside the DAW (ARA-style capture of the vocal track).
+- The web app runs in the browser; for use inside a DAW see the
+  [plugin](plugin/README.md).

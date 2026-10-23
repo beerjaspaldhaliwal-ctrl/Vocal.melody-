@@ -1,0 +1,116 @@
+name: Plugin
+
+on:
+  push:
+    paths: ["plugin/**", ".github/workflows/plugin.yml"]
+    tags: ["v*"]
+  pull_request:
+    paths: ["plugin/**", ".github/workflows/plugin.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            cmake_args: ""
+          - name: macOS
+            os: macos-latest
+            cmake_args: -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          - name: Linux
+            os: ubuntu-24.04
+            cmake_args: -DMELODYLIFT_PLUGIN_TESTS=ON
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libfreetype-dev libfontconfig1-dev libx11-dev \
+            libxrandr-dev libxinerama-dev libxcursor-dev libxext-dev libgl-dev xvfb
+
+      - name: Configure
+        shell: bash
+        run: cmake -S plugin -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_args }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Unit and end-to-end tests
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a ctest --test-dir build -C Release --output-on-failure
+          else
+            ctest --test-dir build -C Release --output-on-failure
+          fi
+
+      - name: Validate with pluginval
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Windows) PV=pluginval_Windows.zip; BIN=./pluginval.exe ;;
+            macOS)   PV=pluginval_macOS.zip;   BIN=./pluginval.app/Contents/MacOS/pluginval ;;
+            Linux)   PV=pluginval_Linux.zip;   BIN=./pluginval ;;
+          esac
+          curl -sSL -o pv.zip "https://github.com/Tracktion/pluginval/releases/download/v1.0.4/$PV"
+          unzip -q pv.zip
+          VST3="build/MelodyLift_artefacts/Release/VST3/MelodyLift.vst3"
+          if [ "$RUNNER_OS" = "Linux" ]; then RUN="xvfb-run -a"; else RUN=""; fi
+          $RUN $BIN --strictness-level 10 --validate-in-process --validate "$VST3"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $out = "dist"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Compress-Archive -Path build/MelodyLift_artefacts/Release/VST3/MelodyLift.vst3, build/MelodyLift_artefacts/Release/Standalone/MelodyLift.exe -DestinationPath "$out/MelodyLift-Windows-VST3.zip"
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $iscc)) { choco install innosetup --no-progress -y | Out-Null }
+          & $iscc "/DSourceDir=$PWD\build\MelodyLift_artefacts\Release" "/O$PWD\$out" plugin/installer/MelodyLift.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p dist
+          cd build/MelodyLift_artefacts/Release
+          for b in VST3/MelodyLift.vst3 AU/MelodyLift.component Standalone/MelodyLift.app; do codesign --force --deep -s - "$b"; done
+          ditto -c -k --keepParent VST3/MelodyLift.vst3 ../../../dist/MelodyLift-macOS-VST3.zip
+          ditto -c -k --keepParent AU/MelodyLift.component ../../../dist/MelodyLift-macOS-AU.zip
+          ditto -c -k --keepParent Standalone/MelodyLift.app ../../../dist/MelodyLift-macOS-Standalone.zip
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist
+          cd build/MelodyLift_artefacts/Release
+          zip -qr ../../../dist/MelodyLift-Linux-VST3.zip VST3/MelodyLift.vst3 Standalone/MelodyLift
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MelodyLift-${{ matrix.name }}
+          path: dist/*
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
