@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!-- HEAD:START -->
+<title>MelodyLift</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Upload a vocal and get an editable MIDI melody.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="css/style.css">
+<!-- HEAD:END -->
+</head>
+<body>
+<!-- BODY:START -->
+<div class="app" id="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">MelodyLift</span>
+      <span class="brand-sub">vocal&nbsp;→&nbsp;MIDI</span>
+    </div>
+    <div class="file-info" id="fileInfo">No audio loaded</div>
+    <div class="top-actions">
+      <label class="btn" for="fileInput" title="Open a vocal recording (WAV, MP3, M4A, FLAC, OGG)">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10m0-10L6 7m4-4 4 4M4 13v3h12v-3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Open vocal
+      </label>
+      <input type="file" id="fileInput" accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg,.opus,.webm" hidden>
+      <button class="btn" id="recBtn" type="button" title="Sing or hum into your microphone">
+        <span class="rec-dot" aria-hidden="true"></span><span id="recLabel">Record</span>
+      </button>
+      <button class="btn" id="demoBtn" type="button" title="Load the built-in demo vocal">Demo</button>
+      <span class="drag-chip" id="dragMidi" draggable="true" title="Drag this straight into your DAW timeline">Drag MIDI</span>
+      <button class="btn btn-primary" id="exportBtn" type="button" disabled>
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10m0 0-4-4m4 4 4-4M4 16h12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Export MIDI
+      </button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <section class="editor" aria-label="Piano roll">
+      <div class="transport">
+        <div class="t-group">
+          <button class="icon-btn" id="toStartBtn" type="button" title="Back to start (Home)" aria-label="Back to start">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 4v12M15 4l-8 6 8 6z" fill="currentColor"/></svg>
+          </button>
+          <button class="icon-btn icon-btn-play" id="playBtn" type="button" title="Play / pause (Space)" aria-label="Play">
+            <svg viewBox="0 0 20 20" aria-hidden="true" id="playIcon"><path d="M6 4l10 6-10 6z" fill="currentColor"/></svg>
+          </button>
+          <div class="clock" id="clock">0:00.000</div>
+          <div class="clock clock-bars" id="clockBars">1.1.1</div>
+        </div>
+        <div class="t-group mix">
+          <label for="vocalVol">Vocal</label>
+          <input type="range" id="vocalVol" min="0" max="1" step="0.01" data-param="vocalVol" data-level="audio">
+          <label for="synthVol">MIDI</label>
+          <input type="range" id="synthVol" min="0" max="1" step="0.01" data-param="synthVol" data-level="audio">
+        </div>
+        <div class="t-group">
+          <label class="check" for="follow"><input type="checkbox" id="follow" data-param="follow" data-level="view"> Follow</label>
+          <button class="icon-btn" id="zoomOutBtn" type="button" title="Zoom out (−)" aria-label="Zoom out">−</button>
+          <button class="icon-btn" id="zoomFitBtn" type="button" title="Fit melody in view" aria-label="Fit">⤢</button>
+          <button class="icon-btn" id="zoomInBtn" type="button" title="Zoom in (+)" aria-label="Zoom in">+</button>
+        </div>
+      </div>
+
+      <div class="roll-wrap" id="rollWrap">
+        <canvas id="roll" tabindex="0" aria-label="Piano roll with detected notes"></canvas>
+        <div class="drop-hint" id="dropHint" hidden>
+          <div>Drop a vocal file to transcribe it</div>
+        </div>
+        <div class="progress" id="progress" hidden>
+          <div class="progress-label" id="progressLabel">Analysing…</div>
+          <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+        </div>
+      </div>
+
+      <div class="statusbar">
+        <div class="stats" id="stats">—</div>
+        <div class="selection" id="selectionInfo" hidden>
+          <span id="selText"></span>
+          <label for="selVel">Vel</label>
+          <input type="number" id="selVel" min="1" max="127" step="1">
+        </div>
+        <div class="hints">Double-click to add or delete · drag to move · drag the right edge to resize · Alt disables snap · Ctrl+Z undo</div>
+      </div>
+    </section>
+
+    <aside class="panel" aria-label="Settings">
+      <details class="group" open>
+        <summary>Detection</summary>
+        <div class="field">
+          <label for="range">Voice range</label>
+          <select id="range" data-param="range" data-level="pitch">
+            <option value="auto">Any voice (C2–C6)</option>
+            <option value="low">Low voice (A1–F5)</option>
+            <option value="high">High voice (C3–F6)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="confMin">Pitch clarity <output for="confMin" id="confMinOut"></output></label>
+          <input type="range" id="confMin" min="0.2" max="0.9" step="0.01" data-param="confMin" data-level="notes">
+          <p class="help">Raise it if breaths and reverb tails turn into notes.</p>
+        </div>
+        <div class="field">
+          <label for="gateDb">Silence threshold <output for="gateDb" id="gateDbOut"></output></label>
+          <input type="range" id="gateDb" min="-70" max="-15" step="1" data-param="gateDb" data-level="notes">
+        </div>
+        <div class="field">
+          <label for="changeCost">Note stability <output for="changeCost" id="changeCostOut"></output></label>
+          <input type="range" id="changeCost" min="2" max="30" step="0.5" data-param="changeCost" data-level="notes">
+          <p class="help">Higher keeps vibrato and slides inside one note. Lower follows fast runs.</p>
+        </div>
+        <div class="field">
+          <label for="minNoteMs">Shortest note <output for="minNoteMs" id="minNoteMsOut"></output></label>
+          <input type="range" id="minNoteMs" min="20" max="300" step="5" data-param="minNoteMs" data-level="notes">
+        </div>
+        <div class="field">
+          <label for="splitDb">Syllable split <output for="splitDb" id="splitDbOut"></output></label>
+          <input type="range" id="splitDb" min="0" max="15" step="0.5" data-param="splitDb" data-level="notes">
+          <p class="help">Splits repeated notes on the same pitch. 0 turns it off.</p>
+        </div>
+      </details>
+
+      <details class="group" open>
+        <summary>Pitch &amp; key</summary>
+        <div class="field">
+          <label for="tuningCents">Reference tuning <output for="tuningCents" id="tuningCentsOut"></output></label>
+          <input type="range" id="tuningCents" min="-50" max="50" step="1" data-param="tuningCents" data-level="notes">
+          <label class="check" for="tuningAuto"><input type="checkbox" id="tuningAuto" data-param="tuningAuto" data-level="notes"> Detect from the singer</label>
+        </div>
+        <div class="field two">
+          <div>
+            <label for="keyTonic">Key</label>
+            <select id="keyTonic" data-param="keyTonic" data-level="post"></select>
+          </div>
+          <div>
+            <label for="scale">Scale</label>
+            <select id="scale" data-param="scale" data-level="post">
+              <option value="major">Major</option>
+              <option value="minor">Minor</option>
+              <option value="harmonicMinor">Harmonic minor</option>
+              <option value="dorian">Dorian</option>
+              <option value="mixolydian">Mixolydian</option>
+              <option value="pentatonicMajor">Major pentatonic</option>
+              <option value="pentatonicMinor">Minor pentatonic</option>
+            </select>
+          </div>
+        </div>
+        <label class="check" for="snap"><input type="checkbox" id="snap" data-param="snap" data-level="post"> Snap notes to the scale</label>
+        <div class="field">
+          <label for="transpose">Transpose <output for="transpose" id="transposeOut"></output></label>
+          <div class="stepper">
+            <button type="button" class="icon-btn" data-transpose="-12" title="Octave down">−8va</button>
+            <button type="button" class="icon-btn" data-transpose="-1" title="Semitone down">−1</button>
+            <input type="range" id="transpose" min="-24" max="24" step="1" data-param="transpose" data-level="post">
+            <button type="button" class="icon-btn" data-transpose="1" title="Semitone up">+1</button>
+            <button type="button" class="icon-btn" data-transpose="12" title="Octave up">+8va</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="group" open>
+        <summary>Tempo &amp; grid</summary>
+        <div class="field two">
+          <div>
+            <label for="bpm">Tempo (BPM)</label>
+            <div class="inline">
+              <input type="number" id="bpm" min="30" max="300" step="0.1" data-param="bpm" data-level="post">
+              <button type="button" class="btn btn-small" id="tapBtn" title="Tap along to set the tempo">Tap</button>
+            </div>
+          </div>
+          <div>
+            <label for="grid">Grid</label>
+            <select id="grid" data-param="grid" data-level="post">
+              <option value="off">Off</option>
+              <option value="4">1/4</option>
+              <option value="8">1/8</option>
+              <option value="8t">1/8 triplet</option>
+              <option value="16">1/16</option>
+              <option value="16t">1/16 triplet</option>
+              <option value="32">1/32</option>
+            </select>
+          </div>
+        </div>
+        <label class="check" for="quantize"><input type="checkbox" id="quantize" data-param="quantize" data-level="post"> Quantize detected notes</label>
+        <div class="field">
+          <label for="strength">Quantize strength <output for="strength" id="strengthOut"></output></label>
+          <input type="range" id="strength" min="0" max="100" step="1" data-param="strength" data-level="post">
+        </div>
+        <p class="help">Set the tempo of the song so bars line up when you drop the MIDI into your DAW. The file starts at 0:00 of the audio.</p>
+      </details>
+
+      <details class="group" open>
+        <summary>Export</summary>
+        <label class="check" for="bends"><input type="checkbox" id="bends" data-param="bends" data-level="none"> Include pitch bends (vibrato, slides)</label>
+        <div class="field">
+          <label for="bendRange">Bend range</label>
+          <select id="bendRange" data-param="bendRange" data-level="none">
+            <option value="2">±2 semitones</option>
+            <option value="12">±12 semitones</option>
+          </select>
+          <p class="help">Match this to the pitch-bend range of the synth you play the MIDI with.</p>
+        </div>
+        <button class="btn btn-primary btn-block" id="exportBtn2" type="button" disabled>Export MIDI</button>
+        <p class="help" id="exportNote" hidden>MIDI files are saved inside a .zip here. Unzip it and drag the .mid into your DAW.</p>
+      </details>
+    </aside>
+  </main>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+</div>
+<!-- BODY:END -->
+<!-- SCRIPTS:START -->
+<script src="src/dsp.js"></script>
+<script src="src/notes.js"></script>
+<script src="src/midi.js"></script>
+<script src="src/app.js"></script>
+<!-- SCRIPTS:END -->
+</body>
+</html>

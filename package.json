@@ -1,0 +1,11 @@
+{
+  "name": "vocal-melody",
+  "version": "1.0.0",
+  "description": "Vocal to MIDI melody extractor: upload a vocal, get an editable MIDI melody.",
+  "private": true,
+  "scripts": {
+    "test": "node test/run-tests.mjs",
+    "build": "node tools/build.mjs"
+  },
+  "license": "MIT"
+}
