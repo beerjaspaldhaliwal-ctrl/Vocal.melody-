@@ -45,7 +45,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout MelodyLiftProcessor::createL
                                                       AudioParameterFloatAttributes().withLabel("ct")));
     p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::keyTonic, 1 }, "Key", tonicChoices(), 0));
     p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::scale, 1 }, "Scale",
-        StringArray { "Major", "Minor", "Harmonic minor", "Dorian", "Mixolydian", "Major pentatonic", "Minor pentatonic" }, 0));
+        StringArray { "Major", "Minor", "Harmonic minor", "Dorian", "Mixolydian", "Major pentatonic", "Minor pentatonic",
+                      "Phrygian", "Phrygian dominant" }, 0));
     p.push_back(std::make_unique<AudioParameterBool>(ParameterID { ids::snap, 1 }, "Snap to scale", false));
     p.push_back(std::make_unique<AudioParameterInt>(ParameterID { ids::transpose, 1 }, "Transpose", -24, 24, 0,
                                                     AudioParameterIntAttributes().withLabel("st")));
@@ -58,20 +59,54 @@ juce::AudioProcessorValueTreeState::ParameterLayout MelodyLiftProcessor::createL
     p.push_back(std::make_unique<AudioParameterBool>(ParameterID { ids::bends, 1 }, "Export pitch bends", false));
     p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::bendRange, 1 }, "Bend range",
                                                        StringArray { "+/-2 semitones", "+/-12 semitones" }, 0));
-    p.push_back(std::make_unique<AudioParameterBool>(ParameterID { ids::midiOut, 1 }, "MIDI out on playback", false));
+    p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::midiOut, 2 }, "MIDI out",
+                                                       StringArray { "Off", "Vocal notes", "Generated pattern" }, 0));
+
+    // generator
+    StringArray styles;
+    for (int i = 0; i < ml::gen::NumStyles; ++i) styles.add(ml::gen::styleName(i));
+    StringArray keys;
+    for (int i = 0; i < 12; ++i) keys.add(ml::pitchClassName(i));
+    auto amount = [](const String& id, const String& name, float def) {
+        return std::make_unique<AudioParameterFloat>(ParameterID { id, 1 }, name, NormalisableRange<float>(0.0f, 100.0f, 1.0f), def,
+                                                     AudioParameterFloatAttributes().withLabel("%"));
+    };
+    p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::gStyle, 1 }, "Style", styles, 0));
+    p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::gKey, 1 }, "Key", keys, 0));
+    p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::gScale, 1 }, "Scale",
+        StringArray { "Style default", "Major", "Minor", "Harmonic minor", "Dorian", "Mixolydian", "Major pentatonic",
+                      "Minor pentatonic", "Phrygian", "Phrygian dominant" }, 0));
+    p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::gBars, 1 }, "Length", StringArray { "4 bars", "8 bars", "16 bars" }, 1));
+    p.push_back(amount(ids::gDensity, "Density", 50));
+    p.push_back(amount(ids::gSyncop, "Syncopation", 50));
+    p.push_back(amount(ids::gRepeat, "Catchiness", 70));
+    p.push_back(amount(ids::gComplex, "Variation", 35));
+    p.push_back(amount(ids::gOrnament, "Ornaments", 50));
+    p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::gRange, 1 }, "Range", StringArray { "Narrow", "Medium", "Wide" }, 1));
+    p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::gOctave, 1 }, "Register", StringArray { "Low", "Mid", "High" }, 1));
+    p.push_back(amount(ids::gHumanize, "Humanize", 20));
+    p.push_back(amount(ids::gSwing, "Swing", 0));
+    p.push_back(std::make_unique<AudioParameterBool>(ParameterID { ids::gPlay, 1 }, "Play pattern with the song", kInstrumentBuild));
+    p.push_back(amount(ids::gVolume, "Preview volume", 70));
     return { p.begin(), p.end() };
 }
 
 MelodyLiftProcessor::MelodyLiftProcessor()
-    : AudioProcessor(BusesProperties()
-                         .withInput("Input", juce::AudioChannelSet::stereo(), true)
-                         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+    : AudioProcessor(kInstrumentBuild ? BusesProperties().withOutput("Output", juce::AudioChannelSet::stereo(), true)
+                                      : BusesProperties()
+                                            .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                                            .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       apvts(*this, nullptr, "Params", createLayout())
 {
     for (auto* prm : getParameters())
         if (auto* wp = dynamic_cast<juce::AudioProcessorParameterWithID*>(prm))
             apvts.addParameterListener(wp->paramID, this);
     activeEnd.fill(-1);
+    for (auto& m : muted) m.store(false);
+    auto& rnd = juce::Random::getSystemRandom();
+    seeds = { (uint32_t) rnd.nextInt(), (uint32_t) rnd.nextInt(), (uint32_t) rnd.nextInt(), (uint32_t) rnd.nextInt(),
+              (uint32_t) rnd.nextInt() };
+    runGenerate(true);
     startTimerHz(15);
 }
 
@@ -88,14 +123,19 @@ bool MelodyLiftProcessor::isBusesLayoutSupported(const BusesLayout& layouts) con
 {
     const auto out = layouts.getMainOutputChannelSet();
     if (out != juce::AudioChannelSet::mono() && out != juce::AudioChannelSet::stereo()) return false;
+    if (kInstrumentBuild) return layouts.getMainInputChannelSet().isDisabled();
     return layouts.getMainInputChannelSet() == out;
 }
 
-void MelodyLiftProcessor::prepareToPlay(double sampleRate, int)
+void MelodyLiftProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
     sr = sampleRate;
     resampler.prepare(sampleRate);
     expectedNext = -1;
+    synth.prepare(sampleRate);
+    synthBuf.setSize(2, std::max(512, samplesPerBlock));
+    genExpected = -1;
+    numPendingOffs = 0;
 }
 
 float MelodyLiftProcessor::param(const juce::String& id) const
@@ -113,14 +153,16 @@ void MelodyLiftProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     for (int ch = numIn; ch < getTotalNumOutputChannels(); ++ch) buffer.clear(ch, 0, n);
 
     bool playing = false;
-    bool hasTime = false;
+    bool hasTime = false, hasPpq = false;
     int64_t timeSamples = 0;
+    double ppq = 0;
     if (auto* ph = getPlayHead())
     {
         if (auto pos = ph->getPosition())
         {
             playing = pos->getIsPlaying();
             if (auto t = pos->getTimeInSamples()) { timeSamples = *t; hasTime = true; }
+            if (auto q = pos->getPpqPosition()) { ppq = *q; hasPpq = true; }
             if (auto b = pos->getBpm()) hostBpm.store(*b);
             if (auto ts = pos->getTimeSignature()) { timeSigNum.store(ts->numerator); timeSigDen.store(ts->denominator); }
         }
@@ -152,7 +194,7 @@ void MelodyLiftProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     }
 
     // ---- MIDI out: play the detected notes in time with the song
-    const bool wantMidi = param(ids::midiOut) > 0.5f;
+    const bool wantMidi = (int) param(ids::midiOut) == (int) MidiOutSource::Vocal;
     if (wantMidi && playing && hasTime)
     {
         const juce::SpinLock::ScopedTryLockType lock(rtLock);
@@ -193,6 +235,129 @@ void MelodyLiftProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         allNotesOff(midi, 0);
         expectedNext = -1;
     }
+
+    renderPattern(buffer, midi, playing, hasPpq, ppq);
+}
+
+// Plays the generated pattern: looped in sync with the host (instrument build,
+// or "play with song"), or free-running for the preview button. Also feeds
+// the MIDI output when it is set to the generated pattern.
+void MelodyLiftProcessor::renderPattern(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi, bool playing,
+                                        bool hasPpq, double ppq)
+{
+    const int n = buffer.getNumSamples();
+    const bool sync = playing && hasPpq && (kInstrumentBuild || param(ids::gPlay) > 0.5f);
+    const bool preview = previewOn.load() && !playing;
+    const bool midiActive = (int) param(ids::midiOut) == (int) MidiOutSource::Pattern && playing && hasPpq;
+    const bool audible = sync || preview;
+
+    auto flushOffs = [&](bool all) {
+        for (int i = 0; i < numPendingOffs;)
+        {
+            auto& po = pendingOffs[(size_t) i];
+            if (all || po.at < genSampleClock + n)
+            {
+                const int off = all ? 0 : (int) juce::jlimit<int64_t>(0, n - 1, po.at - genSampleClock);
+                midi.addEvent(juce::MidiMessage::noteOff(po.channel, po.pitch), off);
+                pendingOffs[(size_t) i] = pendingOffs[(size_t) --numPendingOffs];
+            }
+            else
+                ++i;
+        }
+    };
+
+    if (!audible && !midiActive)
+    {
+        if (genSounding.exchange(false))
+        {
+            synth.allOff();
+            tailSamples = (int64_t) (sr * 0.4); // let the releases ring out
+        }
+        flushOffs(true);
+        genExpected = -1;
+        genBeatNow.store(-1.0);
+        genSampleClock += n;
+        if (tailSamples > 0)
+        {
+            tailSamples -= n;
+            const float gain = param(ids::gVolume) / 100.0f;
+            const int len = std::min(n, synthBuf.getNumSamples());
+            synthBuf.clear(0, 0, len);
+            synthBuf.clear(1, 0, len);
+            synth.render(synthBuf.getWritePointer(0), synthBuf.getWritePointer(1), len, gain, nullptr);
+            for (int ch = 0; ch < buffer.getNumChannels(); ++ch) buffer.addFrom(ch, 0, synthBuf, std::min(ch, 1), 0, len);
+        }
+        return;
+    }
+
+    const double bpm = std::max(20.0, hostBpm.load());
+    const double bps = bpm / 60.0 / sr; // beats per sample
+    const double beat0 = (sync || midiActive) ? ppq : previewBeat;
+    const double beat1 = beat0 + n * bps;
+    if (genExpected >= 0 && std::abs(beat0 - genExpected) > 0.01)
+    {
+        synth.allOff();
+        flushOffs(true);
+    }
+
+    bool mutedNow[ml::gen::NumLayers];
+    for (int l = 0; l < ml::gen::NumLayers; ++l) mutedNow[l] = muted[(size_t) l].load();
+
+    {
+        const juce::SpinLock::ScopedTryLockType lock(genLock);
+        if (lock.isLocked() && rtGenBeats > 0)
+        {
+            const double L = rtGenBeats;
+            for (const auto& g : rtGen)
+            {
+                if (mutedNow[g.layer]) continue;
+                const double k0 = std::ceil((beat0 - g.beat) / L - 1e-9);
+                for (double t = g.beat + k0 * L; t < beat1; t += L)
+                {
+                    if (t < beat0 - 1e-9) continue;
+                    const int off = juce::jlimit(0, n - 1, (int) ((t - beat0) / bps));
+                    const auto lenSamples = (int64_t) std::max(1.0, g.len / bps);
+                    if (audible) synth.noteOn(g.layer, g.pitch, g.vel, lenSamples, off);
+                    if (midiActive)
+                    {
+                        const int ch = g.layer + 1;
+                        midi.addEvent(juce::MidiMessage::noteOn(ch, g.pitch, (juce::uint8) juce::jlimit(1, 127, g.vel)), off);
+                        if (numPendingOffs < (int) pendingOffs.size())
+                            pendingOffs[(size_t) numPendingOffs++] = { genSampleClock + off + lenSamples, ch, g.pitch };
+                        else
+                            midi.addEvent(juce::MidiMessage::noteOff(ch, g.pitch), n - 1);
+                    }
+                }
+            }
+            genBeatNow.store(std::fmod(std::max(0.0, beat0), L));
+            if (preview && previewBeat + n * bps >= L)
+            {
+                previewBeat -= L;
+                genExpected = beat1 - L;
+            }
+            else
+                genExpected = beat1;
+        }
+    }
+    if (preview) previewBeat = genExpected;
+    flushOffs(false);
+
+    if (audible)
+    {
+        genSounding.store(true);
+        const float gain = param(ids::gVolume) / 100.0f;
+        const int chunk = synthBuf.getNumSamples();
+        for (int start = 0; start < n; start += chunk)
+        {
+            const int len = std::min(chunk, n - start);
+            synthBuf.clear(0, 0, len);
+            synthBuf.clear(1, 0, len);
+            synth.render(synthBuf.getWritePointer(0), synthBuf.getWritePointer(1), len, gain, mutedNow);
+            for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                buffer.addFrom(ch, start, synthBuf, std::min(ch, 1), 0, len);
+        }
+    }
+    genSampleClock += n;
 }
 
 void MelodyLiftProcessor::allNotesOff(juce::MidiBuffer& midi, int offset)
@@ -244,6 +409,7 @@ juce::String MelodyLiftProcessor::takeNotice()
 
 void MelodyLiftProcessor::timerCallback()
 {
+    if (std::abs(hostBpm.load() - genBpm) > 0.01) rescaleForTempo(hostBpm.load());
     // capture ends when the transport stops
     if (armed.load() && wroteSinceArm.load() && transportCapture.load() && !hostPlaying.load()
         && juce::Time::getMillisecondCounter() - lastWriteMs.load() > 400)
@@ -485,6 +651,18 @@ void MelodyLiftProcessor::publishNotes()
 void MelodyLiftProcessor::parameterChanged(const juce::String& id, float)
 {
     if (restoring) return;
+    static const juce::StringArray genIds { ids::gStyle, ids::gKey, ids::gScale, ids::gBars, ids::gDensity, ids::gSyncop,
+                                            ids::gRepeat, ids::gComplex, ids::gOrnament, ids::gRange, ids::gOctave,
+                                            ids::gHumanize, ids::gSwing };
+    if (genIds.contains(id))
+    {
+        if (!suppressGen)
+        {
+            pendingGen.store(true);
+            triggerAsyncUpdate();
+        }
+        return;
+    }
     int level = None;
     if (id == ids::range) level = Pitch;
     else if (id == ids::clarity || id == ids::gate || id == ids::stability || id == ids::minNote
@@ -502,6 +680,7 @@ void MelodyLiftProcessor::parameterChanged(const juce::String& id, float)
 
 void MelodyLiftProcessor::handleAsyncUpdate()
 {
+    if (pendingGen.exchange(false)) runGenerate(true);
     const int level = pendingLevel.exchange(None);
     if (level == Pitch)
     {
@@ -651,6 +830,42 @@ void MelodyLiftProcessor::getStateInformation(juce::MemoryBlock& destData)
         tk.setProperty("env", floatsToVar(track.envDb), nullptr);
         root.appendChild(tk, nullptr);
     }
+    {
+        juce::ValueTree g("Generator");
+        g.setProperty("seedChords", (juce::int64) seeds.chords, nullptr);
+        g.setProperty("seedRhythm", (juce::int64) seeds.rhythm, nullptr);
+        g.setProperty("seedPitch", (juce::int64) seeds.pitch, nullptr);
+        g.setProperty("seedBass", (juce::int64) seeds.bass, nullptr);
+        g.setProperty("seedCounter", (juce::int64) seeds.counter, nullptr);
+        int lockMask = 0, muteMask = 0;
+        for (int l = 0; l < ml::gen::NumLayers; ++l)
+        {
+            if (locked[(size_t) l]) lockMask |= 1 << l;
+            if (muted[(size_t) l].load()) muteMask |= 1 << l;
+        }
+        g.setProperty("locked", lockMask, nullptr);
+        g.setProperty("muted", muteMask, nullptr);
+        g.setProperty("active", activeLayer, nullptr);
+        g.setProperty("fromVocal", fromVocal, nullptr);
+        g.setProperty("edited", genEdited, nullptr);
+        g.setProperty("bpm", genBpm, nullptr);
+        g.setProperty("tab", uiTab, nullptr);
+        for (int l = 0; l < ml::gen::NumLayers; ++l)
+        {
+            juce::ValueTree lt("L");
+            for (const auto& n : genNotes[(size_t) l])
+            {
+                juce::ValueTree c("N");
+                c.setProperty("p", n.pitch, nullptr);
+                c.setProperty("s", n.start, nullptr);
+                c.setProperty("e", n.end, nullptr);
+                c.setProperty("v", n.vel, nullptr);
+                lt.appendChild(c, nullptr);
+            }
+            g.appendChild(lt, nullptr);
+        }
+        root.appendChild(g, nullptr);
+    }
     juce::MemoryOutputStream mos(destData, false);
     root.writeToStream(mos);
 }
@@ -703,12 +918,337 @@ void MelodyLiftProcessor::setStateInformation(const void* data, int sizeInBytes)
     sourceName = root.getProperty("source", "").toString();
     undoStack.clear();
     redoStack.clear();
+
+    auto g = root.getChildWithName("Generator");
+    if (g.isValid())
+    {
+        seeds.chords = (uint32_t) (juce::int64) g.getProperty("seedChords", 1);
+        seeds.rhythm = (uint32_t) (juce::int64) g.getProperty("seedRhythm", 2);
+        seeds.pitch = (uint32_t) (juce::int64) g.getProperty("seedPitch", 3);
+        seeds.bass = (uint32_t) (juce::int64) g.getProperty("seedBass", 4);
+        seeds.counter = (uint32_t) (juce::int64) g.getProperty("seedCounter", 5);
+        const int lockMask = g.getProperty("locked", 0), muteMask = g.getProperty("muted", 0);
+        for (int l = 0; l < ml::gen::NumLayers; ++l)
+        {
+            locked[(size_t) l] = (lockMask >> l) & 1;
+            muted[(size_t) l].store((muteMask >> l) & 1);
+        }
+        activeLayer = juce::jlimit(0, ml::gen::NumLayers - 1, (int) g.getProperty("active", 0));
+        fromVocal = (bool) g.getProperty("fromVocal", false);
+        uiTab = (int) g.getProperty("tab", 0);
+        runGenerate(false); // rebuilds the chords for display without touching notes
+        genBpm = (double) g.getProperty("bpm", hostBpm.load());
+        bool any = false;
+        for (int l = 0; l < ml::gen::NumLayers && l < g.getNumChildren(); ++l)
+        {
+            auto& out = genNotes[(size_t) l];
+            out.clear();
+            for (const auto& c : g.getChild(l))
+            {
+                ml::Note n;
+                n.id = ml::newNoteId();
+                n.pitch = n.detPitch = c.getProperty("p", 60);
+                n.pitchRaw = n.pitch;
+                n.start = n.srcStart = c.getProperty("s", 0.0);
+                n.end = c.getProperty("e", 0.0);
+                n.vel = c.getProperty("v", 96);
+                out.push_back(n);
+                any = true;
+            }
+        }
+        if (!any) { genBpm = hostBpm.load(); patternToNotes(); }
+        genEdited = (bool) g.getProperty("edited", false);
+        genUndoStack.clear();
+        genRedoStack.clear();
+        publishPattern();
+    }
     cancelPendingUpdate();
     pendingLevel.store(None);
+    pendingGen.store(false);
     restoring = false;
     ++analysisCount;
     publishNotes();
     sendChangeMessage();
+}
+
+
+// -------------------------------------------------------------- generator
+
+ml::gen::Settings MelodyLiftProcessor::genSettings() const
+{
+    ml::gen::Settings g;
+    g.style = (int) param(ids::gStyle);
+    g.tonic = (int) param(ids::gKey);
+    const int sc = (int) param(ids::gScale);
+    g.scale = sc == 0 ? -1 : sc - 1;
+    static const int bars[] = { 4, 8, 16 };
+    g.bars = bars[juce::jlimit(0, 2, (int) param(ids::gBars))];
+    g.density = param(ids::gDensity) / 100.0;
+    g.syncopation = param(ids::gSyncop) / 100.0;
+    g.repetition = param(ids::gRepeat) / 100.0;
+    g.complexity = param(ids::gComplex) / 100.0;
+    g.ornaments = param(ids::gOrnament) / 100.0;
+    g.range = (int) param(ids::gRange);
+    g.octave = (int) param(ids::gOctave) - 1;
+    g.humanize = param(ids::gHumanize) / 100.0;
+    g.swing = param(ids::gSwing) / 100.0;
+    return g;
+}
+
+void MelodyLiftProcessor::runGenerate(bool replaceNotes)
+{
+    const auto s = genSettings();
+    const double bpm = std::max(20.0, hostBpm.load());
+    if (fromVocal && !notes.empty())
+    {
+        std::vector<ml::gen::GNote> mel;
+        double end = 0;
+        for (const auto& n : notes)
+        {
+            mel.push_back({ n.start * bpm / 60.0, (n.end - n.start) * bpm / 60.0, n.pitch, n.vel });
+            end = std::max(end, n.end * bpm / 60.0);
+        }
+        std::sort(mel.begin(), mel.end(), [](const auto& a, const auto& b) { return a.beat < b.beat; });
+        pattern = ml::gen::buildAround(mel, end, s, seeds);
+    }
+    else
+    {
+        fromVocal = false;
+        pattern = ml::gen::generate(s, seeds);
+    }
+    if (replaceNotes)
+    {
+        const uint32_t now = juce::Time::getMillisecondCounter();
+        if (!genNotes[0].empty() && now - lastGenUndoPush > 700)
+        {
+            genUndoStack.push_back(genNotes);
+            if (genUndoStack.size() > 100) genUndoStack.erase(genUndoStack.begin());
+            genRedoStack.clear();
+        }
+        lastGenUndoPush = now;
+        if (genEdited) notice = "Settings changed, so your edits to the pattern were replaced. Undo brings them back.";
+        genEdited = false;
+        genBpm = bpm;
+        patternToNotes();
+    }
+    publishPattern();
+    sendChangeMessage();
+}
+
+void MelodyLiftProcessor::patternToNotes()
+{
+    const double spb = 60.0 / genBpm;
+    for (int l = 0; l < ml::gen::NumLayers; ++l)
+    {
+        auto& out = genNotes[(size_t) l];
+        out.clear();
+        for (const auto& g : pattern.layers[l])
+        {
+            ml::Note n;
+            n.id = ml::newNoteId();
+            n.pitch = n.detPitch = g.pitch;
+            n.pitchRaw = g.pitch;
+            n.start = n.srcStart = g.beat * spb;
+            n.end = (g.beat + g.len) * spb;
+            n.vel = g.vel;
+            out.push_back(n);
+        }
+    }
+}
+
+void MelodyLiftProcessor::publishPattern()
+{
+    std::vector<RtGen> rt;
+    const double bps = genBpm / 60.0;
+    for (int l = 0; l < ml::gen::NumLayers; ++l)
+        for (const auto& n : genNotes[(size_t) l])
+            rt.push_back({ n.start * bps, (n.end - n.start) * bps, juce::jlimit(0, 127, n.pitch), juce::jlimit(1, 127, n.vel), l });
+    std::sort(rt.begin(), rt.end(), [](const RtGen& a, const RtGen& b) { return a.beat < b.beat; });
+    const juce::SpinLock::ScopedLockType lock(genLock);
+    rtGen.swap(rt);
+    rtGenBeats = std::max(1.0, pattern.beats);
+}
+
+void MelodyLiftProcessor::rescaleForTempo(double newBpm)
+{
+    if (newBpm <= 0) return;
+    const double f = genBpm / newBpm;
+    auto scale = [f](std::array<std::vector<ml::Note>, ml::gen::NumLayers>& layers) {
+        for (auto& layer : layers)
+            for (auto& n : layer) { n.start *= f; n.end *= f; n.srcStart *= f; }
+    };
+    scale(genNotes);
+    for (auto& u : genUndoStack) scale(u);
+    for (auto& r : genRedoStack) scale(r);
+    genBpm = newBpm;
+    publishPattern();
+    sendChangeMessage();
+}
+
+void MelodyLiftProcessor::generate(GenAction action)
+{
+    auto rnd = [] { return (uint32_t) juce::Random::getSystemRandom().nextInt(); };
+    switch (action)
+    {
+        case GenAction::All:
+            if (!locked[ml::gen::Chords]) seeds.chords = rnd();
+            if (!locked[ml::gen::Melody]) { seeds.rhythm = rnd(); seeds.pitch = rnd(); fromVocal = false; }
+            if (!locked[ml::gen::Bass]) seeds.bass = rnd();
+            if (!locked[ml::gen::Counter]) seeds.counter = rnd();
+            break;
+        case GenAction::Hook: seeds.rhythm = rnd(); seeds.pitch = rnd(); fromVocal = false; break;
+        case GenAction::Variation: seeds.pitch = rnd(); fromVocal = false; break;
+        case GenAction::Chords: seeds.chords = rnd(); break;
+        case GenAction::Bass: seeds.bass = rnd(); break;
+        case GenAction::Counter: seeds.counter = rnd(); break;
+    }
+    runGenerate(true);
+}
+
+void MelodyLiftProcessor::rerollLayer(int layer)
+{
+    static const GenAction map[] = { GenAction::Hook, GenAction::Chords, GenAction::Bass, GenAction::Counter };
+    generate(map[juce::jlimit(0, 3, layer)]);
+}
+
+void MelodyLiftProcessor::useVocalKey()
+{
+    if (notes.empty())
+    {
+        notice = "Capture or load a vocal first, then its key can be used here.";
+        sendChangeMessage();
+        return;
+    }
+    const auto k = currentKey();
+    auto set = [this](const juce::String& id, int index) {
+        auto* prm = apvts.getParameter(id);
+        prm->setValueNotifyingHost(prm->convertTo0to1((float) index));
+    };
+    set(ids::gKey, k.tonic);
+    set(ids::gScale, k.scale + 1);
+}
+
+bool MelodyLiftProcessor::chordsForVocal()
+{
+    if (notes.empty())
+    {
+        notice = "Capture or load a vocal first.";
+        sendChangeMessage();
+        return false;
+    }
+    suppressGen = true;
+    useVocalKey();
+    suppressGen = false;
+    fromVocal = true;
+    runGenerate(true);
+    activeLayer = ml::gen::Chords;
+    return true;
+}
+
+void MelodyLiftProcessor::beginGenEdit()
+{
+    genUndoStack.push_back(genNotes);
+    if (genUndoStack.size() > 100) genUndoStack.erase(genUndoStack.begin());
+    genRedoStack.clear();
+}
+
+void MelodyLiftProcessor::endGenEdit()
+{
+    genEdited = true;
+    for (auto& layer : genNotes)
+        std::stable_sort(layer.begin(), layer.end(), [](const ml::Note& a, const ml::Note& b) { return a.start < b.start; });
+    publishPattern();
+    sendChangeMessage();
+}
+
+void MelodyLiftProcessor::genUndo()
+{
+    if (genUndoStack.empty()) return;
+    genRedoStack.push_back(genNotes);
+    genNotes = genUndoStack.back();
+    genUndoStack.pop_back();
+    genEdited = true;
+    publishPattern();
+    sendChangeMessage();
+}
+
+void MelodyLiftProcessor::genRedo()
+{
+    if (genRedoStack.empty()) return;
+    genUndoStack.push_back(genNotes);
+    genNotes = genRedoStack.back();
+    genRedoStack.pop_back();
+    genEdited = true;
+    publishPattern();
+    sendChangeMessage();
+}
+
+void MelodyLiftProcessor::setPreviewPlaying(bool on)
+{
+    if (on) previewBeat = 0;
+    previewOn.store(on);
+    sendChangeMessage();
+}
+
+double MelodyLiftProcessor::getPatternPlayheadSeconds() const
+{
+    const double b = genBeatNow.load();
+    return b < 0 ? -1.0 : b * 60.0 / std::max(20.0, hostBpm.load());
+}
+
+std::vector<uint8_t> MelodyLiftProcessor::buildPatternMidi(int layer) const
+{
+    std::vector<ml::gen::MidiTrack> tracks;
+    const double bps = genBpm / 60.0;
+    for (int l = 0; l < ml::gen::NumLayers; ++l)
+    {
+        if (layer >= 0 && l != layer) continue;
+        ml::gen::MidiTrack t;
+        t.name = ml::gen::layerName(l);
+        t.channel = l;
+        for (const auto& n : genNotes[(size_t) l])
+            t.notes.push_back({ n.start * bps, (n.end - n.start) * bps, n.pitch, n.vel });
+        tracks.push_back(t);
+    }
+    return ml::gen::writeMidiTracks(tracks, genBpm);
+}
+
+juce::String MelodyLiftProcessor::patternSummary() const
+{
+    if (!hasPattern()) return {};
+    static const char* scaleNames[] = { "major", "minor", "harmonic minor", "dorian", "mixolydian", "major pentatonic",
+                                        "minor pentatonic", "phrygian", "phrygian dominant" };
+    juce::String s;
+    s << (fromVocal ? "Your vocal" : ml::gen::styleName(pattern.style)) << "  |  " << ml::pitchClassName(pattern.tonic) << " "
+      << scaleNames[juce::jlimit(0, 8, pattern.scale)] << "  |  ";
+    juce::String prev;
+    int shown = 0;
+    for (const auto& c : pattern.chords)
+    {
+        if (shown >= 8) { s << " ..."; break; }
+        if (c.name == prev && shown > 0) continue;
+        s << (shown ? " " : "") << c.name;
+        prev = c.name;
+        ++shown;
+    }
+    s << "  |  hook score " << juce::String(pattern.hookScore, 1) << "/10";
+    return s;
+}
+
+juce::File MelodyLiftProcessor::writePatternMidiToTempFile(int layer) const
+{
+    auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("MelodyLift");
+    dir.createDirectory();
+    juce::String name = juce::String("MelodyLift ") + (fromVocal ? "Vocal" : ml::gen::styleName(pattern.style)) + " "
+                        + ml::pitchClassName(pattern.tonic) + " " + (layer < 0 ? juce::String("Full") : juce::String(ml::gen::layerName(layer)));
+    auto f = dir.getChildFile(juce::File::createLegalFileName(name) + ".mid");
+    return writePatternMidiFile(f, layer) ? f : juce::File();
+}
+
+bool MelodyLiftProcessor::writePatternMidiFile(const juce::File& f, int layer) const
+{
+    const auto bytes = buildPatternMidi(layer);
+    return f.replaceWithData(bytes.data(), bytes.size());
 }
 
 juce::AudioProcessorEditor* MelodyLiftProcessor::createEditor()

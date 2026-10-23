@@ -209,20 +209,187 @@ int main(int argc, char** argv)
     std::vector<SynthNote> want2 { { 57, 0.5, 0.4 }, { 60, 1.0, 0.4 }, { 64, 1.5, 0.4 }, { 69, 2.0, 0.6 } };
     check(loaded && notesMatch(proc->getNotes(), want2, why), "loading a WAV file transcribes it " + why);
 
-    // 8. editor opens; save a screenshot if asked
-    proc->loadAudioFile(wav); // reload the capture-style example for the picture
-    waitFor([&] { return proc->getStatus() == MelodyLiftProcessor::Status::Idle; }, 20000);
+    // 8. generator: a pattern is ready as soon as the plugin opens
+    auto gen = std::make_unique<MelodyLiftProcessor>();
+    FakePlayHead gph;
+    gph.info.setBpm(120.0);
+    gen->setPlayHead(&gph);
+    gen->setRateAndBufferSizeDetails(kRate, kBlock);
+    gen->prepareToPlay(kRate, kBlock);
+    bool full = gen->hasPattern();
+    for (int l = 0; l < ml::gen::NumLayers; ++l) full = full && !gen->genLayer(l).empty();
+    check(full, "generator has chords, hook, bass and counter on open");
+
+    // locked layers survive Generate
+    const auto melodyBefore = gen->genLayer(ml::gen::Melody);
+    const auto bassBefore = gen->genLayer(ml::gen::Bass);
+    gen->setLayerLocked(ml::gen::Melody, true);
+    gen->setLayerLocked(ml::gen::Chords, true);
+    gen->generate(MelodyLiftProcessor::GenAction::All);
+    bool sameHook = melodyBefore.size() == gen->genLayer(ml::gen::Melody).size();
+    for (size_t i = 0; sameHook && i < melodyBefore.size(); ++i)
+        sameHook = melodyBefore[i].pitch == gen->genLayer(ml::gen::Melody)[i].pitch;
+    bool newBass = bassBefore.size() != gen->genLayer(ml::gen::Bass).size();
+    for (size_t i = 0; !newBass && i < bassBefore.size(); ++i)
+        newBass = bassBefore[i].pitch != gen->genLayer(ml::gen::Bass)[i].pitch || bassBefore[i].start != gen->genLayer(ml::gen::Bass)[i].start;
+    check(sameHook, "locked hook is kept by Generate");
+    check(newBass, "unlocked bass is rewritten by Generate");
+    gen->setLayerLocked(ml::gen::Melody, false);
+    gen->setLayerLocked(ml::gen::Chords, false);
+
+    // switching genre re-renders the same seeds in the new style
+    setParam(*gen, ids::gStyle, (float) ml::gen::PunjabiPop);
+    pump(100);
+    check(gen->patternSummary().contains("Punjabi"), "genre change: " + gen->patternSummary());
+
+    // preview makes sound while the host is stopped
+    auto rms = [&](int blocks) {
+        juce::AudioBuffer<float> buf(2, kBlock);
+        juce::MidiBuffer midi;
+        double sum = 0;
+        gph.info.setIsPlaying(false);
+        for (int b = 0; b < blocks; ++b)
+        {
+            buf.clear();
+            midi.clear();
+            gen->processBlock(buf, midi);
+            sum += buf.getRMSLevel(0, 0, kBlock);
+        }
+        return sum / blocks;
+    };
+    check(rms(20) < 1e-6, "silent until preview starts");
+    gen->setPreviewPlaying(true);
+    const double loud = rms(400);
+    check(loud > 0.01, "preview plays the pattern (rms " + juce::String(loud, 4) + ")");
+    gen->setPreviewPlaying(false);
+    rms(60);
+    check(rms(20) < 1e-4, "preview stops");
+
+    // "play with song" (always on in the instrument build) sounds when the host plays
+    setParam(*gen, ids::gPlay, 1.0f);
     {
-        // show the timeline example: the captured phrase, untransposed
+        juce::AudioBuffer<float> buf(2, kBlock);
+        juce::MidiBuffer midi;
+        double sum = 0;
+        gph.info.setIsPlaying(true);
+        for (int b = 0; b < 400; ++b)
+        {
+            gph.info.setTimeInSamples((int64_t) b * kBlock);
+            gph.info.setPpqPosition(b * kBlock / kRate * 2.0);
+            buf.clear();
+            gen->processBlock(buf, midi);
+            sum += buf.getRMSLevel(0, 0, kBlock);
+        }
+        gph.info.setIsPlaying(false);
+        check(sum / 400 > 0.01, "pattern plays along with the song");
+    }
+    setParam(*gen, ids::gPlay, 0.0f);
+    rms(60);
+
+    // MIDI out plays every layer on its own channel in sync with the host
+    setParam(*gen, ids::midiOut, 2.0f);
+    pump(50);
+    std::array<int, 17> perChannel {};
+    {
+        juce::AudioBuffer<float> buf(2, kBlock);
+        juce::MidiBuffer midi;
+        const double seconds = gen->patternSeconds();
+        gph.info.setIsPlaying(true);
+        for (int64_t pos = 0; pos < (int64_t) (seconds * kRate); pos += kBlock)
+        {
+            gph.info.setTimeInSamples(pos);
+            gph.info.setPpqPosition(pos / kRate * 2.0);
+            buf.clear();
+            midi.clear();
+            gen->processBlock(buf, midi);
+            for (const auto m : midi)
+                if (m.getMessage().isNoteOn()) ++perChannel[(size_t) m.getMessage().getChannel()];
+        }
+        gph.info.setIsPlaying(false);
+        buf.clear();
+        midi.clear();
+        gen->processBlock(buf, midi);
+    }
+    bool channelsOk = true;
+    for (int l = 0; l < ml::gen::NumLayers; ++l)
+        channelsOk = channelsOk && perChannel[(size_t) l + 1] == (int) gen->genLayer(l).size();
+    check(channelsOk, "MIDI out: melody " + juce::String(perChannel[1]) + ", chords " + juce::String(perChannel[2]) + ", bass "
+                          + juce::String(perChannel[3]) + ", counter " + juce::String(perChannel[4]) + " note-ons");
+    setParam(*gen, ids::midiOut, 0.0f);
+
+    // tempo change keeps the pattern on the beat
+    const double firstEnd = gen->genLayer(ml::gen::Bass).back().end;
+    gph.info.setBpm(60.0);
+    {
+        juce::AudioBuffer<float> buf(2, kBlock);
+        juce::MidiBuffer midi;
+        gen->processBlock(buf, midi);
+    }
+    pump(200);
+    check(std::abs(gen->genLayer(ml::gen::Bass).back().end - firstEnd * 2) < 1e-6, "half tempo doubles the note times");
+    gph.info.setBpm(120.0);
+    {
+        juce::AudioBuffer<float> buf(2, kBlock);
+        juce::MidiBuffer midi;
+        gen->processBlock(buf, midi);
+    }
+    pump(200);
+
+    // multi-track export
+    {
+        const auto f = gen->writePatternMidiToTempFile(-1);
+        juce::MidiFile mf;
+        juce::FileInputStream in(f);
+        check(in.openedOk() && mf.readFrom(in) && mf.getNumTracks() == 5, "pattern exports as a 5-track MIDI file (" + f.getFileName() + ")");
+    }
+
+    // save / reload keeps the pattern, edits and locks
+    gen->beginGenEdit();
+    gen->editGenLayer(ml::gen::Melody).front().pitch += 1;
+    gen->endGenEdit();
+    gen->setLayerLocked(ml::gen::Bass, true);
+    juce::MemoryBlock gstate;
+    gen->getStateInformation(gstate);
+    auto gen2 = std::make_unique<MelodyLiftProcessor>();
+    gen2->setStateInformation(gstate.getData(), (int) gstate.getSize());
+    bool sameState = gen2->patternSummary() == gen->patternSummary() && gen2->isLayerLocked(ml::gen::Bass);
+    for (int l = 0; sameState && l < ml::gen::NumLayers; ++l)
+    {
+        sameState = gen2->genLayer(l).size() == gen->genLayer(l).size();
+        for (size_t i = 0; sameState && i < gen->genLayer(l).size(); ++i)
+            sameState = gen2->genLayer(l)[i].pitch == gen->genLayer(l)[i].pitch && std::abs(gen2->genLayer(l)[i].start - gen->genLayer(l)[i].start) < 1e-9;
+    }
+    check(sameState, "generator state survives save / reload, including edits");
+
+    // chords for the captured vocal
+    check(proc->chordsForVocal() && proc->isPatternFromVocal() && proc->getPattern().chords.size() >= 2
+              && proc->genLayer(ml::gen::Melody).size() == proc->getNotes().size(),
+          "chords for vocal: " + proc->patternSummary());
+
+    // 9. editor opens on both tabs; save screenshots if asked
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> ed(gen->createEditor());
+        check(ed != nullptr && ed->getWidth() > 0, "editor opens");
+        if (argc > 1 && ed != nullptr)
+        {
+            pump(200);
+            auto img = ed->createComponentSnapshot(ed->getLocalBounds(), true, 1.0f);
+            const juce::File out { juce::String(argv[1]).replace(".png", "-gen.png") };
+            out.deleteFile();
+            juce::FileOutputStream os(out);
+            juce::PNGImageFormat().writeImageToStream(img, os);
+            std::printf("     screenshot: %s\n", out.getFullPathName().toRawUTF8());
+        }
+    }
+    {
         proc->setStateInformation(state.getData(), (int) state.getSize());
+        proc->setUiTab(1);
         setParam(*proc, ids::transpose, 0.0f);
         setParam(*proc, ids::quantize, 0.0f);
         pump(200);
         std::unique_ptr<juce::AudioProcessorEditor> ed(proc->createEditor());
-        check(ed != nullptr && ed->getWidth() > 0, "editor opens");
         if (argc > 1 && ed != nullptr)
         {
-            ed->setSize(1180, 720);
             pump(100);
             auto img = ed->createComponentSnapshot(ed->getLocalBounds(), true, 1.0f);
             const juce::File out { juce::String(argv[1]) };
@@ -232,6 +399,8 @@ int main(int argc, char** argv)
             std::printf("     screenshot: %s\n", out.getFullPathName().toRawUTF8());
         }
     }
+    gen2.reset();
+    gen.reset();
     proc2.reset();
     proc.reset();
     std::printf("\n%s\n", failures ? "FAILED" : "all passed");

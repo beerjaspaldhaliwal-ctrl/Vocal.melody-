@@ -18,6 +18,47 @@ PianoRoll::PianoRoll(MelodyLiftProcessor& p) : proc(p)
     setOpaque(true);
 }
 
+juce::Colour PianoRoll::layerColour(int layer)
+{
+    static const juce::Colour c[] = { theme::accent, juce::Colour(0xff4fc3b0), juce::Colour(0xff9b7cf2), juce::Colour(0xfff27ca8) };
+    return c[juce::jlimit(0, 3, layer)];
+}
+
+void PianoRoll::setMode(Mode m)
+{
+    if (mode == m) return;
+    mode = m;
+    selected.clear();
+    fittedFor = -1;
+    notesReplaced();
+    repaint();
+}
+
+const std::vector<ml::Note>& PianoRoll::notesRef() const
+{
+    return mode == Mode::Vocal ? proc.getNotes() : proc.genLayer(proc.getActiveLayer());
+}
+
+std::vector<ml::Note>& PianoRoll::editRef()
+{
+    return mode == Mode::Vocal ? proc.editNotes() : proc.editGenLayer(proc.getActiveLayer());
+}
+
+void PianoRoll::beginEdit()
+{
+    if (mode == Mode::Vocal) proc.beginEdit(); else proc.beginGenEdit();
+}
+
+void PianoRoll::endEdit()
+{
+    if (mode == Mode::Vocal) proc.endEdit(); else proc.endGenEdit();
+}
+
+double PianoRoll::playheadSeconds() const
+{
+    return mode == Mode::Vocal ? proc.getPlayheadSeconds() : proc.getPatternPlayheadSeconds();
+}
+
 double PianoRoll::gridSec() const
 {
     return ml::gridSeconds(proc.getHostBpm(), (int) proc.apvts.getRawParameterValue(ids::grid)->load());
@@ -32,8 +73,9 @@ double PianoRoll::snap(double t, const juce::ModifierKeys& m) const
 
 double PianoRoll::contentEnd() const
 {
+    if (mode == Mode::Generator) return std::max(1.0, proc.patternSeconds());
     double e = 8;
-    for (const auto& n : proc.getNotes()) e = std::max(e, n.end);
+    for (const auto& n : notesRef()) e = std::max(e, n.end);
     if (!proc.getTrack().empty()) e = std::max(e, proc.getTrack().size() * proc.getTrack().hopSec());
     return e;
 }
@@ -42,7 +84,7 @@ void PianoRoll::clampView()
 {
     pps = juce::jlimit(4.0, 1600.0, pps);
     rowH = juce::jlimit(6.0, 40.0, rowH);
-    const double visH = getHeight() - kRulerH;
+    const double visH = getHeight() - rulerH();
     sy = juce::jlimit(0.0, std::max(0.0, 128 * rowH - visH), sy);
     const double visW = getWidth() - kKeyW;
     sx = juce::jlimit(0.0, std::max(0.0, contentEnd() * pps + 120 - visW), sx);
@@ -50,9 +92,9 @@ void PianoRoll::clampView()
 
 void PianoRoll::fitToNotes()
 {
-    const auto& notes = proc.getNotes();
+    const auto& notes = notesRef();
     const double visW = std::max(100, getWidth() - kKeyW);
-    const double visH = std::max(100, getHeight() - kRulerH);
+    const double visH = std::max(100, getHeight() - rulerH());
     if (notes.empty())
     {
         sy = (127 - 66) * rowH - visH / 2;
@@ -69,6 +111,7 @@ void PianoRoll::fitToNotes()
         lo = std::min(lo, n.pitch);
         hi = std::max(hi, n.pitch);
     }
+    if (mode == Mode::Generator) { t0 = 0; t1 = contentEnd(); }
     const double span = std::max(1.0, t1 - t0);
     pps = span <= 60 ? (visW - 40) / span : 60;
     sx = std::max(0.0, t0 * pps - 20);
@@ -81,12 +124,14 @@ void PianoRoll::fitToNotes()
 void PianoRoll::notesReplaced()
 {
     std::set<int> keep;
-    for (const auto& n : proc.getNotes())
+    for (const auto& n : notesRef())
         if (selected.count(n.id)) keep.insert(n.id);
     selected.swap(keep);
-    if (fittedFor != proc.getAnalysisCount() && getWidth() > kKeyW + 100 && !proc.getNotes().empty())
+    const int key = mode == Mode::Vocal ? proc.getAnalysisCount()
+                                        : 1000000 + proc.getActiveLayer() * 1000 + proc.getPattern().bars;
+    if (fittedFor != key && getWidth() > kKeyW + 100 && !notesRef().empty())
     {
-        fittedFor = proc.getAnalysisCount();
+        fittedFor = key;
         fitToNotes();
     }
     repaint();
@@ -111,10 +156,10 @@ void PianoRoll::zoomBy(float factor)
 
 void PianoRoll::playheadTick()
 {
-    const double ph = proc.getPlayheadSeconds();
+    const double ph = playheadSeconds();
     if (std::abs(ph - lastPlayhead) < 1e-4) return;
     lastPlayhead = ph;
-    if (proc.isHostPlaying() && drag == Drag::None)
+    if ((proc.isHostPlaying() || mode == Mode::Generator) && drag == Drag::None && ph >= 0)
     {
         const double x = timeToX(ph);
         if (x > getWidth() - 50 || x < kKeyW)
@@ -132,9 +177,9 @@ void PianoRoll::paint(juce::Graphics& g)
 {
     const float W = (float) getWidth(), H = (float) getHeight();
     g.fillAll(theme::rollBg);
-    const auto& notes = proc.getNotes();
+    const auto& notes = notesRef();
 
-    const int pTop = juce::jlimit(0, 127, yToPitch(kRulerH));
+    const int pTop = juce::jlimit(0, 127, yToPitch(rulerH()));
     const int pBot = juce::jlimit(0, 127, yToPitch(H));
     const double t0 = xToTime(kKeyW), t1 = xToTime(W);
     const double beat = 60.0 / std::max(20.0, proc.getHostBpm()) * (4.0 / std::max(1, proc.getTimeSigDen()));
@@ -142,7 +187,7 @@ void PianoRoll::paint(juce::Graphics& g)
 
     {
         juce::Graphics::ScopedSaveState s(g);
-        g.reduceClipRegion(kKeyW, kRulerH, (int) W - kKeyW, (int) H - kRulerH);
+        g.reduceClipRegion(kKeyW, rulerH(), (int) W - kKeyW, (int) H - rulerH());
 
         for (int p = pTop; p >= pBot; --p)
         {
@@ -162,7 +207,7 @@ void PianoRoll::paint(juce::Graphics& g)
         {
             g.setColour(theme::rollLine);
             for (long k = (long) std::floor(t0 / gs); k * gs <= t1; ++k)
-                g.fillRect(juce::Rectangle<float>((float) std::round(timeToX(k * gs)) - 0.5f, (float) kRulerH, 1.0f, H));
+                g.fillRect(juce::Rectangle<float>((float) std::round(timeToX(k * gs)) - 0.5f, (float) rulerH(), 1.0f, H));
         }
         const bool showBeats = beat * pps >= 5;
         for (long k = std::max(0L, (long) std::floor(t0 / beat)); k * beat <= t1; ++k)
@@ -170,13 +215,34 @@ void PianoRoll::paint(juce::Graphics& g)
             const bool bar = k % beatsPerBar == 0;
             if (!bar && !showBeats) continue;
             g.setColour(bar ? theme::rollBar : theme::rollC);
-            g.fillRect(juce::Rectangle<float>((float) std::round(timeToX(k * beat)) - 0.5f, (float) kRulerH, 1.0f, H));
+            g.fillRect(juce::Rectangle<float>((float) std::round(timeToX(k * beat)) - 0.5f, (float) rulerH(), 1.0f, H));
         }
 
         // sung pitch curve
         const auto& tr = proc.getTrack();
         const auto& prep = proc.getTranscription().prep;
-        if (!tr.empty() && prep.midi.size() == tr.size())
+        if (mode == Mode::Generator)
+        {
+            // the other layers, faded, behind the one being edited
+            for (int l = ml::gen::NumLayers - 1; l >= 0; --l)
+            {
+                if (l == proc.getActiveLayer()) continue;
+                const auto c = layerColour(l).withAlpha(proc.isLayerMuted(l) ? 0.12f : 0.38f);
+                g.setColour(c);
+                for (const auto& n : proc.genLayer(l))
+                {
+                    if (n.end < t0 || n.start > t1) continue;
+                    const float y = (float) pitchToY(n.pitch);
+                    if (y > H || y + rowH < rulerH()) continue;
+                    g.fillRect(juce::Rectangle<float>((float) timeToX(n.start), y + 2, std::max(2.0f, (float) (timeToX(n.end) - timeToX(n.start)) - 1), (float) rowH - 4));
+                }
+            }
+            // loop end
+            const float xe = (float) timeToX(contentEnd());
+            g.setColour(theme::fg.withAlpha(0.35f));
+            g.fillRect(juce::Rectangle<float>(xe - 1, (float) rulerH(), 2.0f, H));
+        }
+        else if (!tr.empty() && prep.midi.size() == tr.size())
         {
             const double hop = tr.hopSec();
             const int transpose = (int) proc.apvts.getRawParameterValue(ids::transpose)->load();
@@ -204,10 +270,11 @@ void PianoRoll::paint(juce::Graphics& g)
             if (n.end < t0 || n.start > t1) continue;
             const float x0 = (float) timeToX(n.start), x1 = (float) timeToX(n.end);
             const float y = (float) pitchToY(n.pitch);
-            if (y > H || y + rowH < kRulerH) continue;
+            if (y > H || y + rowH < rulerH()) continue;
             const bool sel = selected.count(n.id) > 0;
             const juce::Rectangle<float> r(x0, y + 1, std::max(2.0f, x1 - x0 - 1), (float) rowH - 2);
-            g.setColour(theme::accent.withAlpha(sel ? 1.0f : 0.8f + 0.2f * (float) n.vel / 127.0f));
+            const auto base = mode == Mode::Generator ? layerColour(proc.getActiveLayer()) : theme::accent;
+            g.setColour(base.withAlpha(sel ? 1.0f : 0.8f + 0.2f * (float) n.vel / 127.0f));
             g.fillRoundedRectangle(r, (float) std::min(3.0, rowH / 4));
             if (sel)
             {
@@ -224,7 +291,7 @@ void PianoRoll::paint(juce::Graphics& g)
 
     // ruler
     g.setColour(theme::panel);
-    g.fillRect(juce::Rectangle<float>((float) kKeyW, 0, W - kKeyW, (float) kRulerH));
+    g.fillRect(juce::Rectangle<float>((float) kKeyW, 0, W - kKeyW, (float) rulerH()));
     {
         const double barPx = beat * beatsPerBar * pps;
         int every = 1;
@@ -237,19 +304,36 @@ void PianoRoll::paint(juce::Graphics& g)
             g.setColour(theme::muted);
             if (k % every == 0)
             {
-                g.fillRect(juce::Rectangle<float>(std::round(x) - 0.5f, kRulerH - 9.0f, 1.0f, 9.0f));
-                g.drawText(juce::String(k + 1), juce::Rectangle<float>(x + 4, 0, 40, kRulerH - 2.0f), juce::Justification::centredLeft);
+                g.fillRect(juce::Rectangle<float>(std::round(x) - 0.5f, 12.0f, 1.0f, 9.0f));
+                g.drawText(juce::String(k + 1), juce::Rectangle<float>(x + 4, 0, 40, 20.0f), juce::Justification::centredLeft);
             }
             else
-                g.fillRect(juce::Rectangle<float>(std::round(x) - 0.5f, kRulerH - 4.0f, 1.0f, 4.0f));
+                g.fillRect(juce::Rectangle<float>(std::round(x) - 0.5f, 17.0f, 1.0f, 4.0f));
+        }
+    }
+    if (mode == Mode::Generator && proc.hasPattern())
+    {
+        const double spb = proc.patternSeconds() / std::max(1.0, proc.getPattern().beats);
+        g.setFont(juce::FontOptions(12.0f, juce::Font::bold));
+        for (const auto& c : proc.getPattern().chords)
+        {
+            const float x = (float) timeToX(c.beat * spb);
+            const float w = (float) (c.len * spb * pps);
+            if (x + w < kKeyW || x > W) continue;
+            g.setColour(layerColour(ml::gen::Chords).withAlpha(0.18f));
+            g.fillRoundedRectangle(juce::Rectangle<float>(x + 1, 21, std::max(0.0f, w - 2), 16), 3);
+            g.setColour(layerColour(ml::gen::Chords));
+            g.drawText(c.name, juce::Rectangle<float>(std::max(x, (float) kKeyW) + 5, 21, std::max(10.0f, w - 8), 16),
+                       juce::Justification::centredLeft, true);
         }
     }
     g.setColour(theme::line);
-    g.fillRect(0.0f, kRulerH - 1.0f, W, 1.0f);
+    g.fillRect(0.0f, rulerH() - 1.0f, W, 1.0f);
 
     // playhead
-    const float ph = (float) timeToX(proc.getPlayheadSeconds());
-    if (ph >= kKeyW && ph <= W)
+    const double phs = playheadSeconds();
+    const float ph = (float) timeToX(phs);
+    if (phs >= 0 && ph >= kKeyW && ph <= W)
     {
         g.setColour(theme::playhead);
         g.fillRect(juce::Rectangle<float>(std::round(ph) - 0.5f, 0, 1.5f, H));
@@ -261,9 +345,9 @@ void PianoRoll::paint(juce::Graphics& g)
     // keyboard
     {
         juce::Graphics::ScopedSaveState s(g);
-        g.reduceClipRegion(0, kRulerH, kKeyW, (int) H - kRulerH);
+        g.reduceClipRegion(0, rulerH(), kKeyW, (int) H - rulerH());
         g.setColour(theme::keyWhite);
-        g.fillRect(0.0f, (float) kRulerH, (float) kKeyW, H);
+        g.fillRect(0.0f, (float) rulerH(), (float) kKeyW, H);
         g.setFont(juce::FontOptions((float) std::min(10.0, rowH - 2)));
         for (int p = pTop; p >= pBot; --p)
         {
@@ -286,22 +370,23 @@ void PianoRoll::paint(juce::Graphics& g)
         }
     }
     g.setColour(theme::line);
-    g.fillRect((float) kKeyW - 1, (float) kRulerH, 1.0f, H);
+    g.fillRect((float) kKeyW - 1, (float) rulerH(), 1.0f, H);
     g.setColour(theme::panel);
-    g.fillRect(0.0f, 0.0f, kKeyW - 1.0f, kRulerH - 1.0f);
+    g.fillRect(0.0f, 0.0f, kKeyW - 1.0f, rulerH() - 1.0f);
     g.setColour(theme::muted);
     g.setFont(juce::FontOptions(10.0f));
-    g.drawText(juce::String(proc.getHostBpm(), 1) + " bpm", juce::Rectangle<float>(4, 0, kKeyW - 6.0f, kRulerH - 1.0f),
+    g.drawText(juce::String(proc.getHostBpm(), 1) + " bpm", juce::Rectangle<float>(4, 0, kKeyW - 6.0f, rulerH() - 1.0f),
                juce::Justification::centredLeft);
 
     if (notes.empty())
     {
         g.setColour(theme::muted);
         g.setFont(juce::FontOptions(15.0f));
-        auto msg = proc.getStatus() == MelodyLiftProcessor::Status::Idle && !proc.hasAnalysis()
-                       ? "Press Capture, then play the song in your DAW.\nOr drop a vocal file here."
+        auto msg = mode == Mode::Generator ? "This layer is empty. Double-click to draw notes, or press the dice."
+                   : proc.getStatus() == MelodyLiftProcessor::Status::Idle && !proc.hasAnalysis()
+                       ? (kInstrumentBuild ? "Load or drop a vocal file here." : "Press Capture, then play the song in your DAW.\nOr drop a vocal file here.")
                        : "";
-        g.drawFittedText(msg, getLocalBounds().withTrimmedLeft(kKeyW).withTrimmedTop(kRulerH), juce::Justification::centred, 3);
+        g.drawFittedText(msg, getLocalBounds().withTrimmedLeft(kKeyW).withTrimmedTop(rulerH()), juce::Justification::centred, 3);
     }
 }
 
@@ -310,11 +395,11 @@ void PianoRoll::paint(juce::Graphics& g)
 PianoRoll::Hit PianoRoll::hitTest(juce::Point<float> p) const
 {
     Hit h;
-    if (p.x < kKeyW || p.y < kRulerH) return h;
+    if (p.x < kKeyW || p.y < rulerH()) return h;
     const int pitch = yToPitch(p.y);
     const double t = xToTime(p.x);
     const double slack = 3 / pps;
-    const auto& notes = proc.getNotes();
+    const auto& notes = notesRef();
     for (int i = (int) notes.size() - 1; i >= 0; --i)
     {
         const auto& n = notes[(size_t) i];
@@ -343,7 +428,7 @@ void PianoRoll::mouseDown(const juce::MouseEvent& e)
     down = e.position;
     moved = false;
     const auto h = hitTest(e.position);
-    auto& notes = proc.editNotes();
+    auto& notes = editRef();
     if (h.index >= 0)
     {
         const auto& n = notes[(size_t) h.index];
@@ -386,9 +471,9 @@ void PianoRoll::mouseDrag(const juce::MouseEvent& e)
     }
     if (drag == Drag::None || orig.empty()) return;
     if (!moved && std::abs(dx) < 3 && std::abs(dy) < 3) return;
-    if (!moved) { proc.beginEdit(); moved = true; }
+    if (!moved) { beginEdit(); moved = true; }
 
-    auto& notes = proc.editNotes();
+    auto& notes = editRef();
     auto find = [&](int id) -> ml::Note* {
         for (auto& n : notes) if (n.id == id) return &n;
         return nullptr;
@@ -427,7 +512,7 @@ void PianoRoll::mouseDrag(const juce::MouseEvent& e)
 
 void PianoRoll::mouseUp(const juce::MouseEvent&)
 {
-    if (moved) proc.endEdit();
+    if (moved) endEdit();
     drag = Drag::None;
     moved = false;
     orig.clear();
@@ -435,10 +520,10 @@ void PianoRoll::mouseUp(const juce::MouseEvent&)
 
 void PianoRoll::mouseDoubleClick(const juce::MouseEvent& e)
 {
-    if (e.position.x < kKeyW || e.position.y < kRulerH) return;
+    if (e.position.x < kKeyW || e.position.y < rulerH()) return;
     const auto h = hitTest(e.position);
-    proc.beginEdit();
-    auto& notes = proc.editNotes();
+    beginEdit();
+    auto& notes = editRef();
     if (h.index >= 0)
     {
         selected.erase(notes[(size_t) h.index].id);
@@ -460,7 +545,7 @@ void PianoRoll::mouseDoubleClick(const juce::MouseEvent& e)
         selected.clear();
         selected.insert(n.id);
     }
-    proc.endEdit();
+    endEdit();
     if (onSelectionChanged) onSelectionChanged();
     repaint();
 }
@@ -477,7 +562,7 @@ void PianoRoll::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheel
     }
     else if (e.mods.isAltDown())
     {
-        const double visH = getHeight() - kRulerH;
+        const double visH = getHeight() - rulerH();
         const double centre = 127 - (sy + visH / 2) / rowH;
         rowH *= std::exp(w.deltaY * 0.6);
         clampView();
@@ -507,19 +592,19 @@ void PianoRoll::mouseMagnify(const juce::MouseEvent& e, float scale)
 void PianoRoll::deleteSelection()
 {
     if (selected.empty()) return;
-    proc.beginEdit();
-    auto& notes = proc.editNotes();
+    beginEdit();
+    auto& notes = editRef();
     notes.erase(std::remove_if(notes.begin(), notes.end(), [&](const ml::Note& n) { return selected.count(n.id) > 0; }),
                 notes.end());
     selected.clear();
-    proc.endEdit();
+    endEdit();
     if (onSelectionChanged) onSelectionChanged();
     repaint();
 }
 
 void PianoRoll::selectAll()
 {
-    for (const auto& n : proc.getNotes()) selected.insert(n.id);
+    for (const auto& n : notesRef()) selected.insert(n.id);
     if (onSelectionChanged) onSelectionChanged();
     repaint();
 }
@@ -530,10 +615,12 @@ bool PianoRoll::keyPressed(const juce::KeyPress& k)
     const int code = k.getKeyCode();
     if (mods.isCommandDown() && (code == 'Z' || code == 'z'))
     {
-        if (mods.isShiftDown()) proc.redo(); else proc.undo();
+        const bool redo = mods.isShiftDown();
+        if (mode == Mode::Vocal) { if (redo) proc.redo(); else proc.undo(); }
+        else { if (redo) proc.genRedo(); else proc.genUndo(); }
         return true;
     }
-    if (mods.isCommandDown() && (code == 'Y' || code == 'y')) { proc.redo(); return true; }
+    if (mods.isCommandDown() && (code == 'Y' || code == 'y')) { if (mode == Mode::Vocal) proc.redo(); else proc.genRedo(); return true; }
     if (mods.isCommandDown() && (code == 'A' || code == 'a')) { selectAll(); return true; }
     if (code == juce::KeyPress::escapeKey) { selected.clear(); repaint(); if (onSelectionChanged) onSelectionChanged(); return true; }
     if (selected.empty()) return false;
@@ -542,8 +629,8 @@ bool PianoRoll::keyPressed(const juce::KeyPress& k)
     const bool vertical = code == juce::KeyPress::upKey || code == juce::KeyPress::downKey;
     const bool horizontal = code == juce::KeyPress::leftKey || code == juce::KeyPress::rightKey;
     if (!vertical && !horizontal) return false;
-    proc.beginEdit();
-    auto& notes = proc.editNotes();
+    beginEdit();
+    auto& notes = editRef();
     if (vertical)
     {
         const int d = (code == juce::KeyPress::upKey ? 1 : -1) * (mods.isShiftDown() ? 12 : 1);
@@ -558,7 +645,7 @@ bool PianoRoll::keyPressed(const juce::KeyPress& k)
         step = std::max(step, -minStart);
         for (auto& n : notes) if (selected.count(n.id)) { n.start += step; n.end += step; }
     }
-    proc.endEdit();
+    endEdit();
     if (onSelectionChanged) onSelectionChanged();
     repaint();
     return true;
@@ -567,7 +654,7 @@ bool PianoRoll::keyPressed(const juce::KeyPress& k)
 juce::String PianoRoll::selectionSummary() const
 {
     std::vector<const ml::Note*> sel;
-    for (const auto& n : proc.getNotes()) if (selected.count(n.id)) sel.push_back(&n);
+    for (const auto& n : notesRef()) if (selected.count(n.id)) sel.push_back(&n);
     if (sel.empty()) return {};
     if (sel.size() > 1) return juce::String((int) sel.size()) + " notes selected";
     const auto& n = *sel[0];

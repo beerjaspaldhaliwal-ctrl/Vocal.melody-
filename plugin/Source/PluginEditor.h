@@ -7,22 +7,27 @@
 #include "PluginProcessor.h"
 #include "Theme.h"
 
+#include <functional>
 #include <map>
 
 /** Drag source that hands a freshly written .mid file to the host (FL Studio, Ableton...). */
 class DragMidiChip : public juce::Component, public juce::SettableTooltipClient
 {
 public:
-    explicit DragMidiChip(MelodyLiftProcessor& p) : proc(p)
+    DragMidiChip(std::function<juce::File()> makeFile, std::function<bool()> hasContent, juce::String label)
+        : makeFile(std::move(makeFile)), hasContent(std::move(hasContent)), label(std::move(label))
     {
         setMouseCursor(juce::MouseCursor::DraggingHandCursor);
-        setTooltip("Drag onto a track in your DAW's playlist or piano roll");
+        setTooltip("Drag onto your DAW's playlist or a channel's piano roll");
     }
     void paint(juce::Graphics& g) override;
     void mouseDrag(const juce::MouseEvent& e) override;
+    void setLabel(const juce::String& l) { label = l; repaint(); }
 
 private:
-    MelodyLiftProcessor& proc;
+    std::function<juce::File()> makeFile;
+    std::function<bool()> hasContent;
+    juce::String label;
     bool dragging = false;
 };
 
@@ -30,7 +35,8 @@ private:
 class ControlsPanel : public juce::Component
 {
 public:
-    explicit ControlsPanel(MelodyLiftProcessor& p);
+    enum class Kind { Vocal, Generator };
+    ControlsPanel(MelodyLiftProcessor& p, Kind kind);
     void paint(juce::Graphics&) override;
     void resized() override;
     int preferredHeight() const { return contentHeight; }
@@ -50,6 +56,7 @@ private:
     void slider(const juce::String& id, const juce::String& label, const juce::String& help = {});
     void combo(const juce::String& id, const juce::String& label);
     void toggle(const juce::String& id, const juce::String& label);
+    void button(const juce::String& label, std::function<void()> onClick);
 
     MelodyLiftProcessor& proc;
     std::vector<Row> rows;
@@ -59,6 +66,37 @@ private:
     std::map<juce::String, juce::Component*> byId;
     std::vector<std::pair<int, juce::String>> headerPos;
     int contentHeight = 0;
+};
+
+/** Small toggle drawn as a speaker (mute) or padlock (lock) icon. */
+class IconToggle : public juce::Button
+{
+public:
+    enum class Icon { Mute, Lock };
+    explicit IconToggle(Icon i) : juce::Button({}), icon(i) { setClickingTogglesState(true); }
+    void paintButton(juce::Graphics& g, bool over, bool down) override;
+    juce::Colour onColour = juce::Colours::orange;
+
+private:
+    Icon icon;
+};
+
+/** One generator layer: select it for editing, mute, lock, re-roll, drag out. */
+class LayerCard : public juce::Component
+{
+public:
+    LayerCard(MelodyLiftProcessor& p, int layer);
+    void paint(juce::Graphics&) override;
+    void resized() override;
+    void mouseUp(const juce::MouseEvent&) override;
+    void refresh();
+
+private:
+    MelodyLiftProcessor& proc;
+    int layer;
+    IconToggle mute { IconToggle::Icon::Mute }, lock { IconToggle::Icon::Lock };
+    juce::TextButton dice { "New" };
+    DragMidiChip drag;
 };
 
 class MelodyLiftEditor : public juce::AudioProcessorEditor,
@@ -84,19 +122,28 @@ private:
     void timerCallback() override;
     void refresh();
     void showNotice(const juce::String& text);
+    void setTab(int tab);
+    bool genTab() const { return tab == 0; }
 
     MelodyLiftProcessor& proc;
     theme::LookAndFeel lnf;
+    int tab = 0;
 
-    juce::TextButton captureBtn { "Capture" }, loadBtn { "Load audio" }, clearBtn { "Clear" },
-        undoBtn { "Undo" }, redoBtn { "Redo" }, fitBtn { "Fit" }, saveBtn { "Save MIDI" };
+    juce::TextButton tabGen { "Generate" }, tabVocal { "Vocal to MIDI" };
+    // generator actions
+    juce::TextButton generateBtn { "Generate" }, hookBtn { "New hook" }, variationBtn { "Variation" },
+        chordsBtn { "New chords" }, previewBtn { "Preview" };
+    // vocal actions
+    juce::TextButton captureBtn { "Capture" }, loadBtn { "Load audio" }, clearBtn { "Clear" }, harmonizeBtn { "Chords for vocal" };
+    juce::TextButton undoBtn { "Undo" }, redoBtn { "Redo" }, fitBtn { "Fit" }, saveBtn { "Save MIDI" };
     DragMidiChip dragChip;
-    juce::Label statusLabel, statsLabel, hintLabel, selectionLabel;
+    juce::Label statusLabel, hintLabel, selectionLabel;
     double progressValue = 0;
     juce::ProgressBar progressBar { progressValue };
     PianoRoll roll;
-    ControlsPanel controls;
-    juce::Viewport controlsView;
+    ControlsPanel vocalControls, genControls;
+    juce::Viewport vocalView, genView;
+    std::array<std::unique_ptr<LayerCard>, ml::gen::NumLayers> cards;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::TooltipWindow tooltips { this, 600 };
 

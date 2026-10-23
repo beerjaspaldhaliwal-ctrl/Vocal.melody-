@@ -15,6 +15,11 @@ class PianoRoll : public juce::Component
 public:
     explicit PianoRoll(MelodyLiftProcessor& p);
 
+    enum class Mode { Vocal, Generator };
+    void setMode(Mode m);
+    Mode getMode() const { return mode; }
+    static juce::Colour layerColour(int layer);
+
     void paint(juce::Graphics&) override;
     void resized() override;
 
@@ -39,12 +44,18 @@ public:
     juce::String selectionSummary() const;
 
 private:
-    static constexpr int kRulerH = 22, kKeyW = 54;
+    static constexpr int kKeyW = 54;
+    int rulerH() const { return mode == Mode::Generator ? 40 : 22; }
+    const std::vector<ml::Note>& notesRef() const;
+    std::vector<ml::Note>& editRef();
+    void beginEdit();
+    void endEdit();
+    double playheadSeconds() const;
 
     double timeToX(double t) const { return kKeyW + t * pps - sx; }
     double xToTime(double x) const { return (x - kKeyW + sx) / pps; }
-    double pitchToY(double p) const { return kRulerH + (127 - p) * rowH - sy; }
-    int yToPitch(double y) const { return 127 - (int) std::floor((y - kRulerH + sy) / rowH); }
+    double pitchToY(double p) const { return rulerH() + (127 - p) * rowH - sy; }
+    int yToPitch(double y) const { return 127 - (int) std::floor((y - rulerH() + sy) / rowH); }
     double gridSec() const;
     double snap(double t, const juce::ModifierKeys& m) const;
     double contentEnd() const;
@@ -67,4 +78,5 @@ private:
     double panSx = 0, panSy = 0;
     double lastPlayhead = -1;
     int fittedFor = -1;
+    Mode mode = Mode::Vocal;
 };

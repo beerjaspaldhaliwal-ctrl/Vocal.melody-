@@ -1,11 +1,13 @@
 // Tests for the JUCE-free core. Synthesises sung melodies and checks the
 // transcription, mirroring test/run-tests.mjs for the web app.
+#include "../Source/core/Generator.h"
 #include "../Source/core/MelodyCore.h"
 
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
 #include <functional>
 #include <string>
 #include <vector>
@@ -199,6 +201,121 @@ int main()
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
         std::printf("     (60 s analysed in %.0f ms, %zu notes)\n", ms, r.notes.size());
         CHECK(r.notes.size() == m.size(), "count " + std::to_string(r.notes.size()));
+    });
+
+
+    // ------------------------------------------------------------- generator
+    test("generator: every style, key and length makes a full pattern", [] {
+        for (int st = 0; st < ml::gen::NumStyles; ++st)
+            for (int bars : { 4, 8, 16 })
+                for (int key : { 0, 5, 9 })
+                {
+                    ml::gen::Settings s; s.style = st; s.bars = bars; s.tonic = key;
+                    ml::gen::Seeds sd; sd.chords = 11 + st; sd.rhythm = 22 + bars; sd.pitch = 33 + key;
+                    auto p = ml::gen::generate(s, sd);
+                    const std::string tag = std::string(ml::gen::styleName(st)) + " " + std::to_string(bars) + " bars key " + std::to_string(key);
+                    CHECK(p.chords.size() == (size_t) bars, tag + ": chords");
+                    for (int l = 0; l < ml::gen::NumLayers; ++l) CHECK(!p.layers[l].empty(), tag + ": empty layer " + ml::gen::layerName(l));
+                    for (int l = 0; l < ml::gen::NumLayers; ++l)
+                        for (auto& n : p.layers[l])
+                            CHECK(n.beat >= -0.05 && n.beat + n.len <= p.beats + 0.6 && n.len > 0 && n.pitch >= 0 && n.pitch <= 127, tag + ": note bounds");
+                    const auto& mel = p.layers[ml::gen::Melody];
+                    for (size_t i = 0; i + 1 < mel.size(); ++i)
+                        CHECK(mel[i].beat + mel[i].len <= mel[i + 1].beat + 1e-6, tag + ": melody overlaps");
+                    for (auto& n : p.layers[ml::gen::Bass]) CHECK(n.pitch < 60, tag + ": bass register");
+                }
+    });
+    test("generator: deterministic for the same seeds", [] {
+        ml::gen::Settings s; s.style = ml::gen::PunjabiPop;
+        ml::gen::Seeds sd; sd.pitch = 99;
+        auto a = ml::gen::generate(s, sd), b = ml::gen::generate(s, sd);
+        CHECK(a.layers[0].size() == b.layers[0].size(), "size");
+        for (size_t i = 0; i < a.layers[0].size(); ++i)
+            CHECK(a.layers[0][i].pitch == b.layers[0][i].pitch && a.layers[0][i].beat == b.layers[0][i].beat, "notes differ");
+        sd.pitch = 100;
+        auto c = ml::gen::generate(s, sd);
+        bool differs = c.layers[0].size() != a.layers[0].size();
+        for (size_t i = 0; !differs && i < a.layers[0].size(); ++i) differs = a.layers[0][i].pitch != c.layers[0][i].pitch;
+        CHECK(differs, "a new pitch seed should change the hook");
+    });
+    test("generator: hooks follow the harmony and stay singable", [] {
+        double ctSum = 0, scoreSum = 0;
+        int n = 0;
+        for (int st = 0; st < ml::gen::NumStyles; ++st)
+            for (uint32_t seed = 1; seed <= 12; ++seed)
+            {
+                ml::gen::Settings s; s.style = st; s.ornaments = 0; s.humanize = 0;
+                ml::gen::Seeds sd; sd.chords = seed; sd.rhythm = seed * 3; sd.pitch = seed * 7;
+                auto p = ml::gen::generate(s, sd);
+                auto h = ml::gen::analyseHook(p.layers[0], p.chords, p.tonic, p.scale, st);
+                CHECK(h.span <= 22, std::string(ml::gen::styleName(st)) + ": span " + std::to_string(h.span));
+                CHECK(h.distinct >= 3, std::string(ml::gen::styleName(st)) + ": too few pitches");
+                // every melody note belongs to the scale bent by the chord under it
+                for (auto& m : p.layers[0])
+                {
+                    bool ok = false;
+                    for (auto& c : p.chords)
+                        if (m.beat >= c.beat - 0.05 && m.beat < c.beat + c.len)
+                        {
+                            const int pc = ((m.pitch % 12) + 12) % 12;
+                            ok = ml::inScale(m.pitch, p.tonic, p.scale) || std::find(c.pcs.begin(), c.pcs.end(), pc) != c.pcs.end();
+                        }
+                    CHECK(ok, std::string(ml::gen::styleName(st)) + ": out-of-key note " + std::to_string(m.pitch));
+                }
+                ctSum += h.chordToneStrong;
+                scoreSum += h.score;
+                ++n;
+            }
+        std::printf("     (strong-beat chord tones %.0f%%, mean hook score %.1f / 10)\n", 100 * ctSum / n, scoreSum / n);
+        CHECK(ctSum / n > 0.85, "chord tones on strong beats");
+        CHECK(scoreSum / n > 7.0, "hook score");
+    });
+    test("generator: the hook repeats its motif", [] {
+        ml::gen::Settings s; s.style = ml::gen::Pop; s.repetition = 1.0; s.complexity = 0.0; s.ornaments = 0; s.humanize = 0;
+        auto p = ml::gen::generate(s, {});
+        std::vector<double> a, b;
+        for (auto& n : p.layers[0]) { if (n.beat < 8) a.push_back(n.beat); else if (n.beat >= 16 && n.beat < 24) b.push_back(n.beat - 16); }
+        CHECK(a.size() == b.size(), "phrase 3 should restate phrase 1's rhythm");
+        for (size_t i = 0; i < a.size(); ++i) CHECK(std::fabs(a[i] - b[i]) < 1e-6, "rhythm differs");
+    });
+    test("generator: key and scale follow the settings", [] {
+        ml::gen::Settings s; s.style = ml::gen::MelodicRap; s.tonic = 2; s.scale = ml::Minor; s.ornaments = 0;
+        auto p = ml::gen::generate(s, {});
+        CHECK(p.chords[0].name.rfind("D", 0) == 0 || p.chords[0].name.rfind("A#", 0) == 0 || p.chords[0].name.rfind("G", 0) == 0
+              || p.chords[0].name.rfind("F", 0) == 0 || p.chords[0].name.rfind("C", 0) == 0 || p.chords[0].name.rfind("A", 0) == 0,
+              "first chord " + p.chords[0].name);
+        CHECK(p.chords[0].name.find('m') != std::string::npos || p.chords[0].name.find("maj") != std::string::npos
+              || p.chords[0].name.find('9') != std::string::npos, "R&B chords carry extensions: " + p.chords[0].name);
+    });
+    test("generator: chords for a vocal melody", [] {
+        // C major melody outlining C | F | G | C
+        std::vector<ml::gen::GNote> mel;
+        const int bars[4][3] = { { 60, 64, 67 }, { 65, 69, 72 }, { 67, 71, 74 }, { 72, 67, 64 } };
+        for (int b = 0; b < 4; ++b)
+            for (int k = 0; k < 3; ++k) mel.push_back({ b * 4.0 + k * 1.3, 1.2, bars[b][k], 96 });
+        auto ch = ml::gen::harmonize(mel, 16, 0, ml::Major, ml::gen::Pop);
+        CHECK(ch.size() == 4, "4 chords");
+        CHECK(ch[0].name == "C" && ch[1].name == "F" && ch[2].name == "G" && ch[3].name == "C",
+              "got " + ch[0].name + " " + ch[1].name + " " + ch[2].name + " " + ch[3].name);
+        ml::gen::Settings s;
+        auto p = ml::gen::buildAround(mel, 16, s, {});
+        CHECK(p.layers[ml::gen::Bass].size() > 4 && p.layers[ml::gen::Chords].size() > 4, "layers around the vocal");
+    });
+    test("generator: multi-track MIDI file", [] {
+        auto p = ml::gen::generate({}, {});
+        std::vector<ml::gen::MidiTrack> tr;
+        for (int l = 0; l < ml::gen::NumLayers; ++l) tr.push_back({ ml::gen::layerName(l), p.layers[l], l });
+        auto b = ml::gen::writeMidiTracks(tr, 100);
+        CHECK(std::memcmp(b.data(), "MThd", 4) == 0 && b[9] == 1 && b[11] == 5, "type 1 with 5 tracks");
+        size_t pos = 14, chunks = 0;
+        while (pos + 8 <= b.size())
+        {
+            CHECK(std::memcmp(b.data() + pos, "MTrk", 4) == 0, "chunk id");
+            const uint32_t len = (b[pos + 4] << 24) | (b[pos + 5] << 16) | (b[pos + 6] << 8) | b[pos + 7];
+            pos += 8 + len;
+            ++chunks;
+        }
+        CHECK(chunks == 5 && pos == b.size(), "chunk layout");
     });
 
     std::printf("\n%s\n", failures ? "FAILED" : "all passed");

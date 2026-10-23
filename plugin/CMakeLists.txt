@@ -43,30 +43,53 @@ juce_add_plugin(MelodyLift
     VST3_CATEGORIES Fx Analyzer
     AU_MAIN_TYPE kAudioUnitType_Effect)
 
-target_sources(MelodyLift PRIVATE
+# Same code as an instrument, so it can sit in FL Studio's Channel Rack like
+# other MIDI generators and play the pattern with the song.
+juce_add_plugin(MelodyLiftGen
+    COMPANY_NAME "MelodyLift"
+    COMPANY_WEBSITE "https://github.com/beerjaspaldhaliwal-ctrl/vocal.melody-"
+    BUNDLE_ID com.melodylift.melodyliftgen
+    PLUGIN_MANUFACTURER_CODE Mlft
+    PLUGIN_CODE Mlf2
+    FORMATS ${MELODYLIFT_FORMATS}
+    PRODUCT_NAME "MelodyLift Generator"
+    DESCRIPTION "Pop melody, chord and bassline generator"
+    IS_SYNTH TRUE
+    NEEDS_MIDI_INPUT FALSE
+    NEEDS_MIDI_OUTPUT TRUE
+    IS_MIDI_EFFECT FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
+    COPY_PLUGIN_AFTER_BUILD FALSE
+    VST3_CATEGORIES Instrument Generator
+    AU_MAIN_TYPE kAudioUnitType_MusicDevice)
+
+set(MELODYLIFT_SOURCES
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/PianoRoll.cpp
-    Source/core/MelodyCore.cpp)
+    Source/core/MelodyCore.cpp
+    Source/core/Generator.cpp)
 
-target_compile_definitions(MelodyLift PUBLIC
-    JUCE_WEB_BROWSER=0
-    JUCE_USE_CURL=0
-    JUCE_VST3_CAN_REPLACE_VST2=0
-    JUCE_USE_MP3AUDIOFORMAT=1
-    JUCE_DISPLAY_SPLASH_SCREEN=0)
-
-target_link_libraries(MelodyLift
-    PRIVATE
-        juce::juce_audio_utils
-        juce::juce_audio_formats
-    PUBLIC
-        juce::juce_recommended_config_flags
-        juce::juce_recommended_lto_flags)
+foreach(target MelodyLift MelodyLiftGen)
+    target_sources(${target} PRIVATE ${MELODYLIFT_SOURCES})
+    target_compile_definitions(${target} PUBLIC
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_VST3_CAN_REPLACE_VST2=0
+        JUCE_USE_MP3AUDIOFORMAT=1
+        JUCE_DISPLAY_SPLASH_SCREEN=0)
+    target_link_libraries(${target}
+        PRIVATE
+            juce::juce_audio_utils
+            juce::juce_audio_formats
+        PUBLIC
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_lto_flags)
+endforeach()
 
 if(MELODYLIFT_TESTS)
     enable_testing()
-    add_executable(MelodyLiftCoreTests tests/CoreTests.cpp Source/core/MelodyCore.cpp)
+    add_executable(MelodyLiftCoreTests tests/CoreTests.cpp Source/core/MelodyCore.cpp Source/core/Generator.cpp)
     add_test(NAME core COMMAND MelodyLiftCoreTests)
 endif()
 
@@ -79,7 +102,8 @@ if(MELODYLIFT_PLUGIN_TESTS)
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp
         Source/PianoRoll.cpp
-        Source/core/MelodyCore.cpp)
+        Source/core/MelodyCore.cpp
+        Source/core/Generator.cpp)
     target_compile_definitions(MelodyLiftPluginTests PRIVATE
         JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1 JUCE_USE_MP3AUDIOFORMAT=1)
     target_link_libraries(MelodyLiftPluginTests PRIVATE

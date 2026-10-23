@@ -6,9 +6,10 @@ Cubase, Studio One, Reaper…).
 
 Everything runs locally in your browser. No upload, no server, no account.
 
-**Want it inside FL Studio?** There is a VST3/AU plugin version in
-[`plugin/`](plugin/README.md): capture the vocal straight from your mixer
-track and drag the MIDI into the playlist.
+**Want it inside FL Studio?** The VST3/AU plugin in
+[`plugin/`](plugin/README.md) captures the vocal straight from your mixer
+track, and adds a pop melody generator (chords, hooks, basslines and riffs
+in eight genres) that you can drag into the playlist.
 
 ## Use it
 

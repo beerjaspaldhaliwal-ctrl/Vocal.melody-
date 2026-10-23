@@ -79,8 +79,12 @@ struct Transcription
 
 enum Scale
 {
-    Major = 0, Minor, HarmonicMinor, Dorian, Mixolydian, PentatonicMajor, PentatonicMinor, NumScales
+    Major = 0, Minor, HarmonicMinor, Dorian, Mixolydian, PentatonicMajor, PentatonicMinor, Phrygian,
+    PhrygianDominant, NumScales
 };
+
+/** Semitone steps of a scale, relative to its tonic. */
+const std::vector<int>& scaleSteps(int scale);
 
 // grid: 0 off, 1 = 1/4, 2 = 1/8, 3 = 1/8T, 4 = 1/16, 5 = 1/16T, 6 = 1/32
 double gridSeconds(double bpm, int grid);

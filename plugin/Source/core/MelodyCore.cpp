@@ -15,20 +15,6 @@ const float kNaN = std::numeric_limits<float>::quiet_NaN();
 
 const char* const kNoteNames[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
 
-const std::vector<int>& scaleSteps(int scale)
-{
-    static const std::vector<int> scales[NumScales] = {
-        { 0, 2, 4, 5, 7, 9, 11 },  // major
-        { 0, 2, 3, 5, 7, 8, 10 },  // natural minor
-        { 0, 2, 3, 5, 7, 8, 11 },  // harmonic minor
-        { 0, 2, 3, 5, 7, 9, 10 },  // dorian
-        { 0, 2, 4, 5, 7, 9, 10 },  // mixolydian
-        { 0, 2, 4, 7, 9 },         // major pentatonic
-        { 0, 3, 5, 7, 10 },        // minor pentatonic
-    };
-    return scales[std::clamp(scale, 0, (int) NumScales - 1)];
-}
-
 // Krumhansl-Kessler key profiles
 const double kMajorProfile[12] = { 6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88 };
 const double kMinorProfile[12] = { 6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17 };
@@ -356,6 +342,22 @@ void putU32(std::vector<uint8_t>& out, uint32_t n)
 } // namespace
 
 // --------------------------------------------------------------- basics
+
+const std::vector<int>& scaleSteps(int scale)
+{
+    static const std::vector<int> scales[NumScales] = {
+        { 0, 2, 4, 5, 7, 9, 11 },  // major
+        { 0, 2, 3, 5, 7, 8, 10 },  // natural minor
+        { 0, 2, 3, 5, 7, 8, 11 },  // harmonic minor
+        { 0, 2, 3, 5, 7, 9, 10 },  // dorian
+        { 0, 2, 4, 5, 7, 9, 10 },  // mixolydian
+        { 0, 2, 4, 7, 9 },         // major pentatonic
+        { 0, 3, 5, 7, 10 },        // minor pentatonic
+        { 0, 1, 3, 5, 7, 8, 10 },  // phrygian
+        { 0, 1, 4, 5, 7, 8, 10 },  // phrygian dominant
+    };
+    return scales[std::clamp(scale, 0, (int) NumScales - 1)];
+}
 
 double hzToMidi(double f) { return 69.0 + 12.0 * std::log2(f / 440.0); }
 double midiToHz(double m) { return 440.0 * std::pow(2.0, (m - 69.0) / 12.0); }

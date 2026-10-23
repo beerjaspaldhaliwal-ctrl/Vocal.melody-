@@ -64,9 +64,10 @@ jobs:
           esac
           curl -sSL -o pv.zip "https://github.com/Tracktion/pluginval/releases/download/v1.0.4/$PV"
           unzip -q pv.zip
-          VST3="build/MelodyLift_artefacts/Release/VST3/MelodyLift.vst3"
           if [ "$RUNNER_OS" = "Linux" ]; then RUN="xvfb-run -a"; else RUN=""; fi
-          $RUN $BIN --strictness-level 10 --validate-in-process --validate "$VST3"
+          for VST3 in "build/MelodyLift_artefacts/Release/VST3/MelodyLift.vst3" "build/MelodyLiftGen_artefacts/Release/VST3/MelodyLift Generator.vst3"; do
+            $RUN $BIN --strictness-level 10 --validate-in-process --validate "$VST3"
+          done
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -74,28 +75,34 @@ jobs:
         run: |
           $out = "dist"
           New-Item -ItemType Directory -Force $out | Out-Null
-          Compress-Archive -Path build/MelodyLift_artefacts/Release/VST3/MelodyLift.vst3, build/MelodyLift_artefacts/Release/Standalone/MelodyLift.exe -DestinationPath "$out/MelodyLift-Windows-VST3.zip"
+          Compress-Archive -Path build/MelodyLift_artefacts/Release/VST3/MelodyLift.vst3, "build/MelodyLiftGen_artefacts/Release/VST3/MelodyLift Generator.vst3", build/MelodyLift_artefacts/Release/Standalone/MelodyLift.exe -DestinationPath "$out/MelodyLift-Windows-VST3.zip"
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (!(Test-Path $iscc)) { choco install innosetup --no-progress -y | Out-Null }
-          & $iscc "/DSourceDir=$PWD\build\MelodyLift_artefacts\Release" "/O$PWD\$out" plugin/installer/MelodyLift.iss
+          & $iscc "/DSourceDir=$PWD\build\MelodyLift_artefacts\Release" "/DGenSourceDir=$PWD\build\MelodyLiftGen_artefacts\Release" "/O$PWD\$out" plugin/installer/MelodyLift.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
         run: |
           mkdir -p dist
-          cd build/MelodyLift_artefacts/Release
-          for b in VST3/MelodyLift.vst3 AU/MelodyLift.component Standalone/MelodyLift.app; do codesign --force --deep -s - "$b"; done
-          ditto -c -k --keepParent VST3/MelodyLift.vst3 ../../../dist/MelodyLift-macOS-VST3.zip
-          ditto -c -k --keepParent AU/MelodyLift.component ../../../dist/MelodyLift-macOS-AU.zip
-          ditto -c -k --keepParent Standalone/MelodyLift.app ../../../dist/MelodyLift-macOS-Standalone.zip
+          stage=$PWD/stage
+          mkdir -p "$stage/VST3" "$stage/AU" "$stage/Standalone"
+          for t in MelodyLift MelodyLiftGen; do
+            cd "build/${t}_artefacts/Release"
+            for b in VST3/*.vst3 AU/*.component Standalone/*.app; do codesign --force --deep -s - "$b"; done
+            cp -R VST3/*.vst3 "$stage/VST3/"; cp -R AU/*.component "$stage/AU/"; cp -R Standalone/*.app "$stage/Standalone/"
+            cd - > /dev/null
+          done
+          (cd "$stage" && ditto -c -k --keepParent VST3 ../dist/MelodyLift-macOS-VST3.zip \
+            && ditto -c -k --keepParent AU ../dist/MelodyLift-macOS-AU.zip \
+            && ditto -c -k --keepParent Standalone ../dist/MelodyLift-macOS-Standalone.zip)
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: |
           mkdir -p dist
-          cd build/MelodyLift_artefacts/Release
-          zip -qr ../../../dist/MelodyLift-Linux-VST3.zip VST3/MelodyLift.vst3 Standalone/MelodyLift
+          (cd build/MelodyLift_artefacts/Release && zip -qr ../../../dist/MelodyLift-Linux-VST3.zip VST3 Standalone)
+          (cd build/MelodyLiftGen_artefacts/Release && zip -qr ../../../dist/MelodyLift-Linux-VST3.zip VST3 Standalone)
 
       - uses: actions/upload-artifact@v4
         with:
