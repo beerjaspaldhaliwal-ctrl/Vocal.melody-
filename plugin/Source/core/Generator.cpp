@@ -52,6 +52,7 @@ int pcOf(int p) { return ((p % 12) + 12) % 12; }
 enum Contour { Arch, Falling, HighStart, RisingArch };
 enum BassKind { BassPop, Bass808, BassEdm, BassBallad, BassBhangra, BassAfro };
 enum CounterKind { Arp16, TripletBells, TumbiRiff, DrillAnswer, AfroMarimba, Broken8 };
+enum Family { FamPop, FamRnB, FamPunjabi, FamBollywood, FamRap, FamAfro, FamEdm, NumFamilies };
 
 struct StyleDef
 {
@@ -75,6 +76,13 @@ struct StyleDef
     double chordLegato;
     CounterKind counter;
     int bassLow;
+    // phrasing and sung expression
+    Family family = FamPop;
+    double pocket = 0;    // beats behind (+) or ahead (-) of the grid
+    double runs = 0;      // melisma runs (R&B, Sufi)
+    double scoops = 0.3;  // scoops up into notes
+    double vibrato = 0.5; // vibrato on long notes
+    double slides = 0.2;  // meend / portamento between notes
 };
 
 const StyleDef& style(int i)
@@ -87,52 +95,108 @@ const StyleDef& style(int i)
             { "bVI", "bVII", "i", "i" }, { "i", "bIII", "bVII", "bVI" } },
           0, 1.6, 0.45, 0.05, 0.9, 0.55, 0.65, 70, 1.0, Arch, 0.15, BassPop,
           { "x.x.x.x.x.x.x.x.", "x..x..x.x..x..x.", "x...x.x.x...x.x." },
-          { "x..x..x...x.x...", "x.......x.......", "x..x..x.x..x..x." }, 0.9, Arp16, 33 },
-        { "Melodic Rap / R&B", Minor,
+          { "x..x..x...x.x...", "x.......x.......", "x..x..x.x..x..x." }, 0.9, Arp16, 33, FamPop, 0.0, 0.05, 0.25, 0.45, 0.1 },
+        { "Melodic Rap", Minor,
           { { "IV", "iii", "vi", "V" }, { "ii", "V", "I", "vi" }, { "I", "vi", "IV", "V" }, { "IV", "V", "iii", "vi" } },
           { { "i", "bVI", "bIII", "bVII" }, { "i", "iv", "bVI", "bVII" }, { "bVI", "bVII", "i", "iv" },
             { "i", "bVII", "bVI", "bVII" }, { "i", "v", "bVI", "iv" }, { "iv", "bVI", "i", "bVII" } },
           2, 2.0, 0.65, 0.35, 0.8, 0.95, 0.6, 64, 0.75, Falling, 0.35, Bass808,
           { "x.........x.....", "x......x..x.....", "x.....x...x....." },
-          { "x...............", "x.......x......." }, 1.0, TripletBells, 28 },
+          { "x...............", "x.......x......." }, 1.0, TripletBells, 28, FamRap, 0.03, 0.15, 0.2, 0.3, 0.15 },
         { "Punjabi Pop", HarmonicMinor,
           { { "I", "V", "vi", "IV" }, { "I", "bVII", "IV", "I" }, { "I", "IV", "V", "IV" } },
           { { "i", "bVII", "bVI", "bVII" }, { "i", "iv", "bVII", "bIII" }, { "i", "bVI", "bVII", "i" },
             { "i", "bVI", "V", "i" }, { "i", "iv", "V", "i" }, { "bVI", "bVII", "i", "i" } },
           0, 1.8, 0.5, 0.15, 0.95, 0.6, 0.72, 69, 1.05, HighStart, 0.8, BassBhangra,
           { "x..x..x.x..x..x.", "x..x..x...x.x...", "x..x.x..x..x.x.." },
-          { "x.......x.......", "x..............." }, 1.0, TumbiRiff, 31 },
+          { "x.......x.......", "x..............." }, 1.0, TumbiRiff, 31, FamPunjabi, 0.0, 0.25, 0.4, 0.7, 0.45 },
         { "Desi / UK Drill", Minor,
           { { "I", "V", "vi", "IV" }, { "vi", "IV", "I", "V" } },
           { { "i", "bVI", "iv", "V" }, { "i", "bVI", "bVII", "V" }, { "i", "iv", "bVI", "V" }, { "i", "bII", "i", "V" },
             { "i", "bVI", "bIII", "V" } },
           0, 1.3, 0.55, 0.3, 0.75, 0.7, 0.62, 65, 0.8, Falling, 0.3, Bass808,
           { "x.....x.x.....x.", "x......x.x......", "x.....x...x.x..." },
-          { "x...............", "x.......x......." }, 1.0, DrillAnswer, 28 },
+          { "x...............", "x.......x......." }, 1.0, DrillAnswer, 28, FamRap, 0.0, 0.05, 0.15, 0.3, 0.2 },
         { "Afrobeats", Major,
           { { "IV", "V", "vi", "vi" }, { "I", "V", "vi", "IV" }, { "ii", "IV", "I", "V" }, { "vi", "IV", "I", "V" } },
           { { "i", "bVII", "bVI", "bVII" }, { "i", "iv", "bVII", "bIII" }, { "i", "bVI", "bVII", "i" } },
           1, 1.8, 0.75, 0.08, 0.8, 0.7, 0.62, 67, 0.9, Arch, 0.2, BassAfro,
           { "x..x..x...x.x...", "x...x.x..x..x...", "x..x...x..x.x..." },
-          { "..x...x...x.x...", "..x..x..x...x..." }, 0.45, AfroMarimba, 33 },
+          { "..x...x...x.x...", "..x..x..x...x..." }, 0.45, AfroMarimba, 33, FamAfro, -0.01, 0.1, 0.25, 0.35, 0.15 },
         { "Dance Pop / EDM", Minor,
           { { "vi", "IV", "I", "V" }, { "I", "V", "vi", "IV" }, { "IV", "V", "vi", "I" }, { "vi", "V", "IV", "V" } },
           { { "i", "bVI", "bIII", "bVII" }, { "bVI", "bVII", "i", "i" }, { "i", "bVII", "bVI", "bVII" }, { "i", "iv", "bVI", "bVII" } },
           0, 2.0, 0.55, 0.03, 0.7, 0.6, 0.55, 72, 1.0, Arch, 0.1, BassEdm,
           { "..x...x...x...x.", "x.x.x.x.x.x.x.x." },
-          { "..x...x...x...x.", "x..x..x...x.x..." }, 0.4, Arp16, 33 },
+          { "..x...x...x...x.", "x..x..x...x.x..." }, 0.4, Arp16, 33, FamEdm, 0.0, 0.0, 0.1, 0.2, 0.05 },
         { "Emotional Ballad", Major,
           { { "I", "V", "vi", "IV" }, { "I", "iii", "IV", "V" }, { "vi", "IV", "I", "V" }, { "I", "vi", "ii", "V" } },
           { { "i", "bVI", "bIII", "bVII" }, { "i", "iv", "bVII", "bIII" }, { "bVI", "bVII", "i", "i" } },
           1, 1.0, 0.3, 0.05, 0.95, 0.5, 0.6, 67, 1.15, RisingArch, 0.25, BassBallad,
           { "x.......x.......", "x.......x...x..." },
-          { "x...x...x...x...", "x.......x......." }, 0.95, Broken8, 36 },
+          { "x...x...x...x...", "x.......x......." }, 0.95, Broken8, 36, FamPop, 0.02, 0.2, 0.35, 0.7, 0.25 },
         { "Trap Melody", Minor,
           { { "vi", "IV", "I", "V" }, { "I", "vi", "IV", "V" } },
           { { "i", "bVI", "bIII", "bVII" }, { "i", "bVII", "bVI", "V" }, { "i", "iv", "bVI", "V" }, { "i", "i", "bVI", "bVII" } },
           1, 1.8, 0.6, 0.3, 0.8, 0.85, 0.6, 66, 0.8, Falling, 0.25, Bass808,
           { "x.....x...x..x..", "x..x......x.....", "x.......x.x....." },
-          { "x...............", "x.......x......." }, 1.0, TripletBells, 28 },
+          { "x...............", "x.......x......." }, 1.0, TripletBells, 28, FamRap, 0.02, 0.1, 0.2, 0.3, 0.15 },
+        { "90s R&B", Major,
+          { { "I", "vi", "ii", "V" }, { "IV", "iii", "ii", "I" }, { "ii", "V", "I", "I" }, { "I", "iii", "IV", "iv" },
+            { "vi", "ii", "V", "I" }, { "IV", "V", "iii", "vi" } },
+          { { "i", "iv", "bVII", "bIII" }, { "i", "iv", "v", "i" }, { "bVI", "v", "i", "i" }, { "i", "bVI", "iv", "v" } },
+          1, 1.7, 0.6, 0.25, 0.9, 0.5, 0.62, 67, 1.1, Arch, 0.55, BassPop,
+          { "x..x..x...x.x...", "x...x..x.x......" },
+          { "x...............", "x.......x..x...." }, 0.95, Broken8, 31, FamRnB, 0.04, 0.7, 0.45, 0.55, 0.3 },
+        { "Neo-Soul", Dorian,
+          { { "ii", "V", "iii", "vi" }, { "IV", "iii", "ii", "I" }, { "I", "IV", "ii", "V" } },
+          { { "i", "IV", "bVII", "i" }, { "i", "iv", "bVII", "bIII" }, { "iv", "bVII", "bIII", "bVI" }, { "i", "bIII", "IV", "iv" } },
+          2, 1.5, 0.7, 0.3, 0.9, 0.45, 0.58, 65, 1.15, Arch, 0.5, BassAfro,
+          { "x...x.x...x..x..", "x..x....x.x....." },
+          { "x......x..x.....", "x..............." }, 0.9, Broken8, 31, FamRnB, 0.06, 0.55, 0.5, 0.4, 0.35 },
+        { "Alt R&B", Minor,
+          { { "vi", "IV", "I", "iii" }, { "IV", "vi", "iii", "V" } },
+          { { "i", "bVI", "bIII", "bVII" }, { "i", "bVII", "bVI", "bVI" }, { "bVI", "iv", "i", "bVII" }, { "i", "v", "iv", "bVI" } },
+          2, 1.4, 0.6, 0.3, 0.85, 0.8, 0.65, 63, 0.8, Falling, 0.35, Bass808,
+          { "x.......x.......", "x.........x....." },
+          { "x...............", "x.......x......." }, 1.0, TripletBells, 28, FamRnB, 0.05, 0.35, 0.4, 0.35, 0.3 },
+        { "Trap-Soul", Minor,
+          { { "vi", "IV", "I", "V" }, { "IV", "V", "iii", "vi" } },
+          { { "i", "bVI", "bIII", "bVII" }, { "i", "iv", "bVI", "bVII" }, { "bVI", "bVII", "i", "iv" }, { "i", "v", "bVI", "iv" } },
+          2, 1.9, 0.65, 0.4, 0.85, 0.9, 0.6, 64, 0.8, Falling, 0.35, Bass808,
+          { "x.....x...x..x..", "x..x......x....." },
+          { "x...............", "x.......x......." }, 1.0, TripletBells, 28, FamRnB, 0.03, 0.45, 0.35, 0.3, 0.25 },
+        { "Bollywood Romantic", Minor,
+          { { "I", "IV", "V", "IV" }, { "I", "vi", "IV", "V" }, { "I", "V", "vi", "IV" } },
+          { { "i", "bVII", "bVI", "bVII" }, { "i", "iv", "bVII", "bIII" }, { "bVI", "bVII", "i", "i" }, { "i", "bIII", "bVII", "iv" },
+            { "i", "v", "bVI", "bVII" } },
+          0, 1.3, 0.35, 0.12, 0.97, 0.5, 0.75, 68, 1.15, RisingArch, 0.65, BassBallad,
+          { "x.......x.......", "x.......x...x..." },
+          { "x...x...x...x...", "x.......x......." }, 0.95, Broken8, 33, FamBollywood, 0.01, 0.35, 0.55, 0.75, 0.6 },
+        { "Bollywood Dance", Minor,
+          { { "I", "bVII", "IV", "I" }, { "I", "V", "vi", "IV" } },
+          { { "i", "bVII", "bVI", "bVII" }, { "i", "bVI", "bVII", "i" }, { "i", "iv", "v", "i" }, { "i", "bIII", "bVII", "bVI" } },
+          0, 1.9, 0.55, 0.1, 0.85, 0.85, 0.65, 69, 1.0, Arch, 0.45, BassBhangra,
+          { "x..x..x.x..x..x.", "x..x..x...x.x..." },
+          { "x..x..x.x..x..x.", "..x...x...x...x." }, 0.5, TumbiRiff, 33, FamBollywood, 0.0, 0.2, 0.35, 0.5, 0.35 },
+        { "Sufi Pop", HarmonicMinor,
+          { { "I", "bII", "I", "bVII" }, { "I", "IV", "V", "I" } },
+          { { "i", "bVI", "V", "i" }, { "i", "iv", "V", "i" }, { "i", "bII", "i", "V" }, { "bVI", "V", "i", "i" }, { "i", "bVII", "bVI", "V" } },
+          0, 1.2, 0.4, 0.15, 0.97, 0.65, 0.72, 69, 1.2, HighStart, 0.85, BassBallad,
+          { "x.......x.......", "x...........x..." },
+          { "x.......x.......", "x..............." }, 1.0, DrillAnswer, 33, FamBollywood, 0.02, 0.55, 0.5, 0.8, 0.7 },
+        { "Punjabi Romantic", Minor,
+          { { "I", "V", "vi", "IV" }, { "IV", "I", "V", "vi" } },
+          { { "i", "bVI", "bIII", "bVII" }, { "i", "bVII", "bVI", "bVII" }, { "i", "iv", "bVI", "bVII" }, { "bVI", "bVII", "i", "i" } },
+          0, 1.4, 0.4, 0.1, 0.96, 0.6, 0.72, 68, 1.1, HighStart, 0.7, BassBallad,
+          { "x.......x.......", "x.......x...x..." },
+          { "x.......x.......", "x...x...x...x..." }, 0.95, Broken8, 33, FamPunjabi, 0.01, 0.3, 0.5, 0.75, 0.55 },
+        { "Synth-Pop", Major,
+          { { "I", "V", "vi", "IV" }, { "vi", "IV", "I", "V" }, { "I", "iii", "IV", "V" }, { "IV", "V", "iii", "vi" } },
+          { { "i", "bVI", "bIII", "bVII" }, { "i", "bVII", "bVI", "bVII" } },
+          0, 1.9, 0.5, 0.02, 0.75, 0.7, 0.6, 71, 1.05, Arch, 0.1, BassEdm,
+          { "x.x.x.x.x.x.x.x.", "x...x.x.x...x.x." },
+          { "x.......x.......", "..x...x...x...x." }, 0.6, Arp16, 33, FamEdm, 0.0, 0.0, 0.15, 0.2, 0.05 },
     };
     return defs[std::clamp(i, 0, (int) NumStyles - 1)];
 }
@@ -352,6 +416,96 @@ const std::vector<Cell>& cells()
     return c;
 }
 
+
+// ------------------------------------------------------- phrase library
+// Generic two-bar phrase shapes per genre family, written as a rhythm on a
+// 16th grid ('x' attack, '-' hold, '.' rest) plus a contour in scale steps
+// from the phrase's anchor note. They encode common gestures of each style
+// (pickups, falling R&B tails, high Punjabi openings, long Bollywood lines),
+// not any particular song. The generator re-fits them to the chords.
+struct PhraseTpl
+{
+    const char* rhythm;
+    std::vector<int> degs;
+};
+
+const std::vector<PhraseTpl>& phraseLibrary(int family)
+{
+    static const std::vector<PhraseTpl> lib[NumFamilies] = {
+        { // pop (Hollywood / western)
+          { "..x-x-x-x-x-x---..x-x-x-x-x-----", { 0, 0, 1, 2, 2, 1, 0, 0, 1, 2, -1 } },
+          { "x---x-x-x---x---x---x-x-x-------", { 2, 1, 0, 1, -1, 2, 1, 0, -1 } },
+          { "x-x-x---x-x-x---x-x-x-x-x-------", { 0, 1, 2, 0, 1, 2, 3, 2, 1, 0, -1 } },
+          { "...x-x-x-x--x---...x-x-x-x--x---", { 0, 1, 2, 1, 0, 0, 1, 2, 1, -1 } },
+          { "x-----x-x-x-x---x-----x-x-x-----", { 3, 2, 1, 2, 0, 3, 2, 1, 0 } },
+          { "x-xx-x-x-x------x-xx-x-x-x------", { 0, 0, 1, 2, 1, 0, 0, 0, 1, 2, 3, 2 } },
+          { "..x-x-x---x-x---..x-x-x---x-----", { 4, 3, 2, 1, 2, 4, 3, 2, 0 } },
+          { "x-x-x-x-x-------x-x-x-x-x-x-x---", { 0, 2, 4, 3, 2, 0, 2, 4, 5, 4, 3, 2 } } },
+        { // R&B
+          { "..x.x-x-x-------..x.x-x-xx-x----", { 2, 2, 1, 0, 2, 2, 1, 0, -1, -2 } },
+          { "x--x--x-x---..x-x--x--x-x-x-----", { 0, 1, 2, 1, -1, 0, 1, 2, 1, 0 } },
+          { "...xx-x-x-x---x-...xx-x-x---x---", { 2, 2, 1, 0, 1, -1, 2, 2, 1, 0, -2 } },
+          { "x-x---x-xx-x-----x-x---x-xx-x---", { 4, 3, 2, 1, 0, 1, 4, 3, 2, 1, 0, -1 } },
+          { "..x-x-x--x-x----..x-x-x--x-xx---", { 0, 2, 1, 0, -1, 0, 2, 1, 0, -1, -2 } },
+          { ".x-x-xx-x-------.x-x-xx-x-x-----", { 0, 0, 1, 0, -1, 0, 0, 1, 0, -1, -2 } },
+          { "x---..x-x-x-x---x---..x-x-xx----", { 3, 2, 1, 2, 0, 3, 2, 1, 0, -1 } },
+          { "..xx-x-x-------x..xx-x-x-x------", { 1, 2, 1, 0, -1, 1, 2, 1, 0, -1 } } },
+        { // Punjabi
+          { "x-------x-x-x-x-x---x-x-x-------", { 4, 3, 2, 3, 2, 1, 2, 1, 0 } },
+          { "x---x-x-x-x-x---x-------x-x-x---", { 2, 4, 3, 2, 1, 2, 0, 1, 0, -1 } },
+          { "x-x-x-------x-x-x-x-x-x-x-------", { 0, 2, 4, 3, 2, 1, 2, 1, 0, -1 } },
+          { "..x-x-x-x-------..x-x-x-x-x-x---", { 3, 4, 3, 2, 1, 2, 1, 0, 1, 0 } },
+          { "x-----x-x-x-x-x-x-----x-x-------", { 5, 4, 3, 4, 3, 2, 3, 1, 0 } },
+          { "x-x-x-x-x---x---x-x-x-x-x-------", { 4, 4, 3, 2, 3, 2, 3, 3, 2, 1, 0 } } },
+        { // Bollywood
+          { "x-------x---x---x-------x---x---", { 0, 1, 2, 4, 3, 2 } },
+          { "x---x---x-x-x---x-------x---x---", { 2, 3, 4, 3, 2, 1, 0, 1 } },
+          { "..x-x-x-x-------..x-x-x-x-x-----", { 0, 1, 2, 3, 2, 1, 0, 1, -1 } },
+          { "x-----x-x-------x-----x-x-x-----", { 4, 3, 2, 3, 2, 1, 0 } },
+          { "x---x---x---x---x-x-x-x-x-------", { 0, 2, 1, 3, 2, 1, 0, -1, 0 } },
+          { "....x-x-x-x-x-------x-x-x-x-----", { 0, 1, 2, 3, 4, 3, 2, 1, 0 } },
+          { "x-x-x-------x-x-x-------x-x-x---", { 2, 3, 4, 3, 2, 1, 2, 1, 0 } } },
+        { // rap / drill / trap
+          { "x-x-x-xx-x-x....x-x-x-xx-x-x....", { 0, 0, 0, 1, 0, -1, -1, 0, 0, 0, 1, 0, -1, -2 } },
+          { "..x-x-x-x-x-x---..x-x-x-x-x-x---", { 1, 1, 1, 0, 0, -1, 1, 1, 1, 0, -1, -2 } },
+          { "x--x--x-x--x--x-x--x--x-x-------", { 2, 1, 0, 0, 1, 0, 2, 1, 0, -1 } },
+          { "...x-x-x-x-x-x-x...x-x-x-x------", { 0, 0, 1, 1, 0, 0, -1, 0, 0, -1, -2 } },
+          { "x-x-x---x-x-x---x-x-x---x-x-----", { 2, 2, 1, 2, 2, 1, 2, 2, 1, 0, -1 } } },
+        { // afro
+          { "x--x--x---x-x---x--x--x---x-----", { 0, 0, 1, 2, 1, 0, 0, 1, -1 } },
+          { "..x--x--x-x-x-....x--x--x-x-----", { 2, 2, 1, 0, 1, 2, 2, 1, 0 } },
+          { "x-x--x--x---x---x-x--x--x-------", { 0, 1, 2, 1, 0, 0, 1, 2, 0 } },
+          { "...x--x--x-x....x--x--x--x-x----", { 1, 1, 0, -1, 1, 1, 0, -1, -2 } } },
+        { // dance / synth-pop
+          { "x-x-x-x-x-x-x-x-x-x-x-x-x-------", { 0, 2, 4, 2, 0, 2, 4, 2, 1, 2, 3, 2, 0 } },
+          { "x--x--x-x--x--x-x--x--x-x--x--x-", { 0, 0, 1, 2, 2, 1, 0, 0, 1, 2, 1, 0 } },
+          { "x-x-x---x-x-x---x-x-x---x-x-x---", { 0, 1, 2, 2, 1, 0, 0, 1, 2, 3, 2, 1 } },
+          { "..x-x-x-x-x-x-x...x-x-x-x-x-----", { 4, 3, 2, 1, 2, 3, 4, 4, 3, 2, 1, 0 } } },
+    };
+    return lib[std::clamp(family, 0, (int) NumFamilies - 1)];
+}
+
+int onsetsIn(const char* rhythm)
+{
+    int n = 0;
+    for (const char* c = rhythm; *c; ++c) n += *c == 'x';
+    return n;
+}
+
+/** Moves a pitch by whole scale steps (scale of the key). */
+int scaleMove(int pitch, int steps, int tonic, int scale)
+{
+    const auto& st = scaleSteps(scale);
+    auto inKey = [&](int p) { return std::find(st.begin(), st.end(), pcOf(p - tonic)) != st.end(); };
+    int p = pitch;
+    while (!inKey(p)) --p;
+    for (int k = 0; k < std::abs(steps); ++k)
+    {
+        do p += steps > 0 ? 1 : -1; while (!inKey(p));
+    }
+    return p;
+}
+
 struct Ev
 {
     double beat, len;
@@ -428,21 +582,83 @@ double rhythmScore(const std::vector<Ev>& ev, const StyleDef& sd, const Settings
     return sc;
 }
 
-std::vector<Ev> makeMotifRhythm(const StyleDef& sd, const Settings& s, uint32_t seed)
+struct Motif
 {
-    std::vector<Ev> best;
-    double bestScore = -1e9;
-    for (int k = 0; k < 10; ++k)
+    std::vector<Ev> ev;
+    std::vector<int> guide; // contour in scale steps when the motif comes from the phrase library
+};
+
+void markStrong(std::vector<Ev>& ev)
+{
+    for (size_t i = 0; i < ev.size(); ++i)
     {
-        Rng r(mix(seed, 100 + k));
-        auto ev = rhythmFromCells(sd, s, r, 0, {});
-        // breathe: clear the last beat most of the time
-        if (r.chance(0.75)) ev.erase(std::remove_if(ev.begin(), ev.end(), [](const Ev& e) { return e.beat >= 7.0; }), ev.end());
-        finishDurations(ev, 8.0, sd.legato);
-        const double sc = rhythmScore(ev, sd, s);
-        if (sc > bestScore) { bestScore = sc; best = ev; }
+        const double frac = ev[i].beat - std::floor(ev[i].beat + 1e-9);
+        const int beatInBar = (int) std::floor(ev[i].beat + 1e-9) % 4;
+        ev[i].strong = (frac < 1e-6 && (beatInBar == 0 || beatInBar == 2)) || ev[i].len >= 1.0 || i == 0;
     }
-    return best;
+}
+
+Motif makeMotif(const StyleDef& sd, const Settings& s, uint32_t seed)
+{
+    Motif out;
+    Rng pick(mix(seed, 900));
+    const auto& lib = phraseLibrary(sd.family);
+    if (!lib.empty() && pick.chance(s.idiom))
+    {
+        // of three random library phrases, take the one nearest the wanted density
+        const double want = targetDensity(sd, s) * 8.0;
+        const PhraseTpl* t = nullptr;
+        for (int k = 0; k < 3; ++k)
+        {
+            const auto& c = lib[(size_t) pick.below((int) lib.size())];
+            if (t == nullptr || std::fabs(onsetsIn(c.rhythm) - want) < std::fabs(onsetsIn(t->rhythm) - want)) t = &c;
+        }
+        for (int i = 0; i < 32; ++i)
+        {
+            if (t->rhythm[i] != 'x') continue;
+            int hold = 1;
+            while (i + hold < 32 && t->rhythm[i + hold] == '-') ++hold;
+            out.ev.push_back({ i * 0.25, hold * 0.25 * (hold == 1 ? 0.9 : 0.96), false });
+        }
+        out.guide = t->degs;
+        markStrong(out.ev);
+    }
+    else
+    {
+        double bestScore = -1e9;
+        for (int k = 0; k < 10; ++k)
+        {
+            Rng r(mix(seed, 100 + k));
+            auto ev = rhythmFromCells(sd, s, r, 0, {});
+            // breathe: clear the last beat most of the time
+            if (r.chance(0.75)) ev.erase(std::remove_if(ev.begin(), ev.end(), [](const Ev& e) { return e.beat >= 7.0; }), ev.end());
+            finishDurations(ev, 8.0, sd.legato);
+            const double sc = rhythmScore(ev, sd, s);
+            if (sc > bestScore) { bestScore = sc; out.ev = ev; }
+        }
+    }
+    if (s.section == PostHook)
+    {
+        // post-chorus hook: one bar, said twice
+        std::vector<Ev> bar;
+        for (const auto& e : out.ev) if (e.beat < 4.0 - 1e-9) bar.push_back(e);
+        if (bar.size() >= 2)
+        {
+            const size_t n = bar.size();
+            if (!out.guide.empty()) out.guide.resize(std::min(out.guide.size(), n));
+            for (size_t i = 0; i < n; ++i)
+            {
+                bar[i].len = std::min(bar[i].len, (i + 1 < n ? bar[i + 1].beat : 4.0) - bar[i].beat);
+                Ev e = bar[i];
+                e.beat += 4.0;
+                bar.push_back(e);
+                if (!out.guide.empty() && i < out.guide.size()) out.guide.push_back(out.guide[i]);
+            }
+            out.ev = bar;
+            markStrong(out.ev);
+        }
+    }
+    return out;
 }
 
 // --------------------------------------------------------------- melody
@@ -454,6 +670,7 @@ struct MelCtx
     int tonic, scale, ext;
     const std::vector<Chord>* chords;
     int lo, hi, center;
+    Contour contour = Arch;
 };
 
 double contourAt(Contour c, double u)
@@ -489,7 +706,8 @@ enum PhraseKind { KindA, KindAnswer, KindFinal, KindNew };
 
 /** Picks pitches for one phrase, note by note, scoring every candidate. */
 std::vector<int> composePhrase(const MelCtx& m, const std::vector<Ev>& rh, double start, PhraseKind kind, Rng& r,
-                               int prevPitch, int prevInterval, const std::vector<int>* reuseFirstHalf)
+                               int prevPitch, int prevInterval, const std::vector<int>* reuseFirstHalf,
+                               const std::vector<int>* guide = nullptr)
 {
     std::vector<int> out;
     const int n = (int) rh.size();
@@ -517,13 +735,21 @@ std::vector<int> composePhrase(const MelCtx& m, const std::vector<Ev>& rh, doubl
         }
 
         const double u = n > 1 ? (double) i / (n - 1) : 0.0;
-        double target = m.center + contourAt(m.sd->contour, u) * half;
+        double target = m.center + contourAt(m.contour, u) * half;
+        double targetWeight = 2.0;
+        if (guide && (size_t) i < guide->size())
+        {
+            // follow the library phrase's contour from its anchor note
+            if (i == 0) target = m.center + (*guide)[0] * 1.6 - 2.0;
+            else target = scaleMove(out[0], (*guide)[(size_t) i] - (*guide)[0], m.tonic, m.scale);
+            targetWeight = i == 0 ? 2.0 : 3.2;
+        }
         const bool last = i == n - 1;
         double bestCost = 1e9;
         int bestP = avail.front();
         for (int c : avail)
         {
-            double cost = 2.0 * std::fabs(c - target) / std::max(1.0, half);
+            double cost = targetWeight * std::fabs(c - target) / std::max(1.0, half);
             if (prev > 0)
             {
                 const int d = c - prev;
@@ -607,6 +833,7 @@ struct Phrase
 
 std::vector<Phrase> planPhrases(const StyleDef& sd, const Settings& s, const std::vector<Ev>& motif, uint32_t seed)
 {
+    const bool hook = s.section == PostHook;
     Rng r(mix(seed, 7));
     const int P = std::max(1, s.bars / 2);
     std::vector<PhraseKind> kinds;
@@ -616,12 +843,14 @@ std::vector<Phrase> planPhrases(const StyleDef& sd, const Settings& s, const std
         PhraseKind k = q == 0 || q == 2 ? KindA : (q == 1 ? KindAnswer : KindFinal);
         if (P == 2 && p == 1) k = KindFinal;
         if (p > 0 && k == KindA && !r.chance(0.35 + 0.65 * s.repetition)) k = KindNew;
+        if (hook && k == KindNew) k = KindA;
         kinds.push_back(k);
     }
     std::vector<Phrase> out;
     for (int p = 0; p < P; ++p)
     {
         Phrase ph { kinds[(size_t) p], motif };
+        bool rebuilt = false;
         if (ph.kind == KindNew)
         {
             Rng rn(mix(seed, 200 + p));
@@ -629,32 +858,35 @@ std::vector<Phrase> planPhrases(const StyleDef& sd, const Settings& s, const std
             if (rn.chance(0.7))
                 ph.rhythm.erase(std::remove_if(ph.rhythm.begin(), ph.rhythm.end(), [](const Ev& e) { return e.beat >= 7.0; }), ph.rhythm.end());
             if (ph.rhythm.size() < 4) ph.rhythm = motif;
+            else rebuilt = true;
         }
-        else if (ph.kind == KindAnswer || ph.kind == KindFinal)
+        else if ((ph.kind == KindAnswer || ph.kind == KindFinal) && !(hook && ph.kind == KindAnswer))
         {
             Rng rn(mix(seed, 300 + p));
             if (rn.chance(0.25 + 0.7 * s.complexity) || ph.kind == KindFinal)
             {
+                rebuilt = true;
                 ph.rhythm = rhythmFromCells(sd, s, rn, 4, motif);
                 // end the phrase on a held note
                 ph.rhythm.erase(std::remove_if(ph.rhythm.begin(), ph.rhythm.end(), [](const Ev& e) { return e.beat >= 6.0 + 1e-9; }), ph.rhythm.end());
                 if (ph.kind == KindFinal && (ph.rhythm.empty() || ph.rhythm.back().beat < 5.0)) ph.rhythm.push_back({ 5.0, 1.0, true });
-                if (ph.rhythm.size() < 3) ph.rhythm = motif;
+                if (ph.rhythm.size() < 3) { ph.rhythm = motif; rebuilt = false; }
             }
         }
         else if (p > 0 && ph.kind == KindA)
         {
             // a repeated A keeps its rhythm exactly unless the player wants variation
             Rng rn(mix(seed, 400 + p));
-            if (rn.chance(s.complexity * 0.35)) ph.rhythm = rhythmFromCells(sd, s, rn, 6, motif);
+            if (rn.chance(s.complexity * 0.35)) { ph.rhythm = rhythmFromCells(sd, s, rn, 6, motif); rebuilt = true; }
         }
-        finishDurations(ph.rhythm, 8.0, sd.legato);
+        if (rebuilt) finishDurations(ph.rhythm, 8.0, sd.legato);
         out.push_back(ph);
     }
     return out;
 }
 
-std::vector<GNote> composeMelody(const MelCtx& m, const std::vector<Phrase>& plan, uint32_t pitchSeed)
+std::vector<GNote> composeMelody(const MelCtx& m, const std::vector<Phrase>& plan, uint32_t pitchSeed,
+                                 const std::vector<int>* guide)
 {
     std::vector<GNote> notes;
     Rng r(pitchSeed);
@@ -673,7 +905,8 @@ std::vector<GNote> composeMelody(const MelCtx& m, const std::vector<Phrase>& pla
         else if ((ph.kind == KindAnswer || ph.kind == KindFinal) && !motifPitches.empty())
             pitches = composePhrase(m, ph.rhythm, start, ph.kind, r, prev, prevIv, &motifPitches);
         else
-            pitches = composePhrase(m, ph.rhythm, start, ph.kind == KindNew ? KindNew : KindA, r, prev, prevIv, nullptr);
+            pitches = composePhrase(m, ph.rhythm, start, ph.kind == KindNew ? KindNew : KindA, r, prev, prevIv, nullptr,
+                                    p == 0 && guide && !guide->empty() ? guide : nullptr);
         if (p == 0) motifPitches = pitches;
         for (size_t i = 0; i < ph.rhythm.size() && i < pitches.size(); ++i)
         {
@@ -709,7 +942,31 @@ void ornament(std::vector<GNote>& mel, const MelCtx& m, uint32_t seed)
         const bool canDown = it != avail.end() && it != avail.begin();
         const bool lastOfPhrase = i + 1 == mel.size() || std::floor(mel[i + 1].beat / 8.0) != std::floor(n.beat / 8.0);
 
-        if (m.sd->contour == HighStart && n.len >= 0.9 && canUp && canDown && r.chance(amount * 0.45))
+        const double runAmount = std::clamp(m.sd->runs * 2.0 * m.s.ornaments, 0.0, 1.0);
+        const bool indian = m.sd->family == FamPunjabi || m.sd->family == FamBollywood;
+        const int degree = pcOf(n.pitch - m.tonic);
+        const long idx = it == avail.end() ? -1 : (long) (it - avail.begin());
+        if (runAmount > 0 && n.len >= 0.9 && idx >= 0 && (lastOfPhrase || r.chance(0.35)) && r.chance(runAmount * 0.55))
+        {
+            // melisma run: a quick descending line from above into the held note
+            const int k = 3 + r.below(3);
+            const double step = m.sd->family == FamRnB ? 0.125 : 1.0 / 6.0;
+            if (idx + k < (long) avail.size() && k * step <= n.len * 0.6)
+            {
+                for (int j = 0; j < k; ++j)
+                    out.push_back({ n.beat + j * step, step, avail[(size_t) (idx + k - j)], 84 - 3 * j });
+                n.beat += k * step;
+                n.len -= k * step;
+            }
+        }
+        else if (m.sd->family == FamRnB && degree == 4 && n.len >= 0.5 && r.chance(amount * 0.4))
+        {
+            // blue note: slide up from the flat third
+            out.push_back({ n.beat, 0.1, n.pitch - 1, 78 });
+            n.beat += 0.1;
+            n.len -= 0.1;
+        }
+        else if ((m.contour == HighStart || indian) && n.len >= 0.9 && canUp && canDown && r.chance(amount * 0.45))
         {
             // murki: quick upper-main-lower turn into the note
             const double g = 1.0 / 12.0;
@@ -738,6 +995,60 @@ void ornament(std::vector<GNote>& mel, const MelCtx& m, uint32_t seed)
         }
     }
     mel.swap(out);
+}
+
+/**
+ * Makes the hook feel sung: scoops into notes, meend slides between
+ * connected notes, vibrato on held notes, falls at phrase ends, and
+ * phrase-shaped dynamics that swell toward each phrase's peak.
+ */
+void voiceExpression(std::vector<GNote>& mel, const MelCtx& m, uint32_t seed)
+{
+    const double f = std::clamp(m.s.feel, 0.0, 1.0);
+    if (f <= 0.01 || mel.empty()) return;
+    const StyleDef& sd = *m.sd;
+    Rng r(mix(seed, 77));
+    const double vibMul = sd.family == FamBollywood ? 1.3 : 1.0;
+    for (size_t i = 0; i < mel.size(); ++i)
+    {
+        auto& n = mel[i];
+        if (n.len < 0.2) continue; // ornaments stay plain
+        const GNote* prev = i > 0 ? &mel[i - 1] : nullptr;
+        const double gap = prev ? n.beat - (prev->beat + prev->len) : 99.0;
+        const bool phraseStart = gap > 0.4;
+        const bool lastOfPhrase = i + 1 == mel.size() || mel[i + 1].beat - (n.beat + n.len) > 0.4;
+        const int iv = prev ? prev->pitch - n.pitch : 0;
+        if (!phraseStart && gap < 0.08 && std::abs(iv) >= 1 && std::abs(iv) <= 5 && r.chance(sd.slides * f * 1.2))
+            n.slide = (float) std::clamp(iv, -2, 2);
+        else if (n.len >= 0.4 && (phraseStart || r.chance(0.3)) && r.chance(sd.scoops * f * 1.3))
+            n.scoop = r.chance(0.6) ? -1.0f : -0.5f;
+        if (n.len >= 0.75 && r.chance(0.4 + 0.6 * sd.vibrato))
+            n.vib = (float) ((0.12 + 0.3 * sd.vibrato) * f * vibMul);
+        const double fallBias = (sd.family == FamRnB || sd.family == FamRap) ? 1.2 : 0.6;
+        if (lastOfPhrase && n.len >= 0.6 && r.chance(f * 0.35 * fallBias)) n.fall = true;
+    }
+    // dynamics: swell toward each phrase's highest note, ease off at its end
+    for (double ps = 0; ps < m.s.bars * 4.0; ps += 8.0)
+    {
+        int lo = 127, hi = 0;
+        std::vector<size_t> idx;
+        for (size_t i = 0; i < mel.size(); ++i)
+            if (mel[i].beat >= ps && mel[i].beat < ps + 8.0) { idx.push_back(i); lo = std::min(lo, mel[i].pitch); hi = std::max(hi, mel[i].pitch); }
+        for (size_t k = 0; k < idx.size(); ++k)
+        {
+            auto& n = mel[idx[k]];
+            const double frac = n.beat - std::floor(n.beat + 1e-9);
+            const bool strong = frac < 1e-6 && ((int) std::floor(n.beat + 1e-9) % 2) == 0;
+            double v = 80.0 + 24.0 * (hi > lo ? (double) (n.pitch - lo) / (hi - lo) : 0.5) + (strong ? 8.0 : 0.0);
+            if (k + 1 == idx.size()) v -= 6.0;
+            if (n.len < 0.2) v -= 10.0;
+            n.vel = std::clamp((int) std::lround(n.vel + (v - n.vel) * f), 1, 127);
+        }
+    }
+    // laid-back (or pushed) pocket
+    const double pocket = sd.pocket * (0.4 + 0.8 * f);
+    if (std::fabs(pocket) > 1e-4)
+        for (auto& n : mel) n.beat = std::max(0.0, n.beat + pocket);
 }
 
 void humanizeAndSwing(std::vector<GNote>& notes, double humanize, double swing, uint64_t seed, bool timing)
@@ -939,6 +1250,72 @@ std::vector<GNote> makeCounter(const StyleDef& sd, const std::vector<Chord>& cho
 
 const char* styleName(int s) { return style(s).name; }
 
+const char* sectionName(int sec)
+{
+    static const char* names[NumSections] = { "Verse", "Pre-Chorus", "Chorus", "Post-Chorus Hook" };
+    return names[std::clamp(sec, 0, (int) NumSections - 1)];
+}
+
+int styleGroup(int st)
+{
+    switch (st)
+    {
+        case Pop: case SynthPop: case DancePop: case Ballad: return 0;
+        case NinetiesRnB: case NeoSoul: case AltRnB: case TrapSoul: return 1;
+        case MelodicRap: case Trap: case Drill: return 2;
+        case PunjabiPop: case PunjabiRomantic: return 3;
+        case BollywoodRomantic: case BollywoodDance: case SufiPop: return 4;
+        default: return 5;
+    }
+}
+
+const char* styleGroupName(int g)
+{
+    static const char* names[kNumStyleGroups] = { "Hollywood / Western Pop", "R&B", "Hip-Hop", "Punjabi", "Bollywood", "Afro" };
+    return names[std::clamp(g, 0, kNumStyleGroups - 1)];
+}
+
+int phraseLibraryErrors()
+{
+    int bad = 0;
+    for (int f = 0; f < NumFamilies; ++f)
+        for (const auto& t : phraseLibrary(f))
+            if (std::strlen(t.rhythm) != 32 || onsetsIn(t.rhythm) != (int) t.degs.size()) ++bad;
+    return bad;
+}
+
+std::vector<std::pair<double, double>> expressionCurve(const GNote& n, double bpm)
+{
+    std::vector<std::pair<double, double>> pts;
+    const double start = n.slide != 0 ? n.slide : n.scoop;
+    if (start == 0 && n.vib <= 0 && !n.fall) return pts;
+    const double spb = 60.0 / std::max(20.0, bpm);
+    const double glide = n.slide != 0 ? std::min(0.2, n.len * 0.35) : std::min(0.12, n.len * 0.3);
+    const double fallLen = std::min(0.25, n.len * 0.3);
+    for (double t = 0; t < n.len - 1e-9; t += 1.0 / 32.0)
+    {
+        double v = 0;
+        if (start != 0 && t < glide)
+        {
+            const double u = t / glide;
+            v += start * (1.0 - u * u * (3.0 - 2.0 * u));
+        }
+        if (n.vib > 0)
+        {
+            const double onset = n.len * 0.35;
+            if (t > onset) v += n.vib * std::min(1.0, (t - onset) / 0.25) * std::sin(2 * kPi * 5.5 * t * spb);
+        }
+        if (n.fall && t > n.len - fallLen)
+        {
+            const double u = (t - (n.len - fallLen)) / fallLen;
+            v -= 1.5 * u * u;
+        }
+        pts.push_back({ n.beat + t, v });
+    }
+    pts.push_back({ n.beat + n.len, 0.0 });
+    return pts;
+}
+
 const char* layerName(int l)
 {
     static const char* names[NumLayers] = { "Melody", "Chords", "Bass", "Riff" };
@@ -1022,25 +1399,59 @@ Pattern generate(const Settings& in, const Seeds& seeds)
     m.scale = pat.scale;
     m.ext = sd.ext;
     m.chords = &pat.chords;
-    const double range = (s.range == 0 ? 8.0 : s.range == 1 ? 12.0 : 16.0) * sd.rangeMul;
-    m.center = sd.center + 12 * std::clamp(s.octave, -1, 1);
+    // song section: register, density, repetition and contour
+    double sectionRange = 1.0;
+    int sectionShift = 0;
+    m.contour = sd.contour;
+    switch (std::clamp(s.section, 0, (int) NumSections - 1))
+    {
+        case Verse:
+            s.density = std::clamp(s.density + 0.12, 0.0, 1.0);
+            s.repetition = std::clamp(s.repetition - 0.1, 0.0, 1.0);
+            sectionShift = -3;
+            sectionRange = 0.85;
+            if (m.contour == RisingArch) m.contour = Arch;
+            break;
+        case PreChorus:
+            s.density = std::clamp(s.density + 0.05, 0.0, 1.0);
+            sectionShift = -1;
+            m.contour = RisingArch;
+            break;
+        case Chorus:
+            s.density = std::clamp(s.density - 0.08, 0.0, 1.0);
+            s.repetition = std::clamp(s.repetition + 0.15, 0.0, 1.0);
+            sectionShift = 2;
+            sectionRange = 1.1;
+            break;
+        case PostHook:
+            s.density = std::clamp(s.density + 0.05, 0.0, 1.0);
+            s.repetition = 1.0;
+            sectionShift = 2;
+            sectionRange = 0.8;
+            break;
+        default: break;
+    }
+    m.s = s;
+    const double range = (s.range == 0 ? 8.0 : s.range == 1 ? 12.0 : 16.0) * sd.rangeMul * sectionRange;
+    m.center = sd.center + sectionShift + 12 * std::clamp(s.octave, -1, 1);
     m.lo = (int) std::lround(m.center - range / 2);
     m.hi = (int) std::lround(m.center + range / 2);
 
-    const auto motif = makeMotifRhythm(sd, s, seeds.rhythm);
-    const auto plan = planPhrases(sd, s, motif, seeds.rhythm);
+    const auto motif = makeMotif(sd, s, seeds.rhythm);
+    const auto plan = planPhrases(sd, s, motif.ev, seeds.rhythm);
 
     // best of many candidates by the hook score
     std::vector<GNote> best;
     double bestScore = -1e9;
     for (int k = 0; k < 24; ++k)
     {
-        auto mel = composeMelody(m, plan, (uint32_t) mix(seeds.pitch, 1000 + k));
+        auto mel = composeMelody(m, plan, (uint32_t) mix(seeds.pitch, 1000 + k), &motif.guide);
         const double sc = analyseHook(mel, pat.chords, pat.tonic, pat.scale, s.style).score;
         if (sc > bestScore) { bestScore = sc; best = std::move(mel); }
     }
     pat.hookScore = bestScore;
     ornament(best, m, seeds.pitch);
+    voiceExpression(best, m, seeds.pitch);
     humanizeAndSwing(best, s.humanize, s.swing, mix(seeds.pitch, 9), true);
     // keep the hook monophonic after ornaments and timing feel
     std::sort(best.begin(), best.end(), [](const GNote& x, const GNote& y) { return x.beat < y.beat; });
@@ -1185,8 +1596,29 @@ std::vector<uint8_t> writeMidiTracks(const std::vector<MidiTrack>& tracks, doubl
         {
             const uint32_t a = tick(n.beat), b = std::max(a + 1, tick(n.beat + n.len));
             const uint8_t p = (uint8_t) std::clamp(n.pitch, 0, 127);
-            ev.push_back({ a, 1, (uint8_t) (0x90 | ch), p, (uint8_t) std::clamp(n.vel, 1, 127) });
+            ev.push_back({ a, 2, (uint8_t) (0x90 | ch), p, (uint8_t) std::clamp(n.vel, 1, 127) });
             ev.push_back({ b, 0, (uint8_t) (0x80 | ch), p, 0 });
+        }
+        if (tr.expression)
+        {
+            const int range = std::clamp(tr.bendRange, 1, 24);
+            const uint8_t rpn[6][2] = { { 101, 0 }, { 100, 0 }, { 6, (uint8_t) range }, { 38, 0 }, { 101, 127 }, { 100, 127 } };
+            for (auto& r : rpn) ev.push_back({ 0, -1, (uint8_t) (0xb0 | ch), r[0], r[1] });
+            auto bend = [&](double beat, double semis) {
+                const int v = std::clamp((int) std::lround(8192 + std::clamp(semis, -(double) range, (double) range) / range * 8191), 0, 16383);
+                ev.push_back({ tick(beat), 1, (uint8_t) (0xe0 | ch), (uint8_t) (v & 127), (uint8_t) ((v >> 7) & 127) });
+            };
+            for (const auto& n : tr.notes)
+            {
+                const auto pts = expressionCurve(n, bpm);
+                double last = 1e9;
+                for (size_t i = 0; i < pts.size(); ++i)
+                    if (i == 0 || i + 1 == pts.size() || std::fabs(pts[i].second - last) >= 0.02)
+                    {
+                        bend(pts[i].first, pts[i].second);
+                        last = pts[i].second;
+                    }
+            }
         }
         std::stable_sort(ev.begin(), ev.end(), [](const Ev& x, const Ev& y) { return x.t != y.t ? x.t < y.t : x.ord < y.ord; });
         std::vector<uint8_t> t { 0, 0xff, 0x03 };

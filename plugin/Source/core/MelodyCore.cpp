@@ -355,6 +355,8 @@ const std::vector<int>& scaleSteps(int scale)
         { 0, 3, 5, 7, 10 },        // minor pentatonic
         { 0, 1, 3, 5, 7, 8, 10 },  // phrygian
         { 0, 1, 4, 5, 7, 8, 10 },  // phrygian dominant
+        { 0, 2, 4, 6, 7, 9, 11 },  // lydian (raga Yaman)
+        { 0, 1, 4, 5, 7, 8, 11 },  // raga Bhairav
     };
     return scales[std::clamp(scale, 0, (int) NumScales - 1)];
 }

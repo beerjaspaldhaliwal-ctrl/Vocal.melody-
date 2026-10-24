@@ -27,7 +27,8 @@ inline const juce::String range = "range", clarity = "clarity", gate = "gate", s
 inline const juce::String gStyle = "gStyle", gKey = "gKey", gScale = "gScale", gBars = "gBars",
                           gDensity = "gDensity", gSyncop = "gSyncop", gRepeat = "gRepeat", gComplex = "gComplex",
                           gOrnament = "gOrnament", gRange = "gRange", gOctave = "gOctave", gHumanize = "gHumanize",
-                          gSwing = "gSwing", gPlay = "gPlay", gVolume = "gVolume";
+                          gSwing = "gSwing", gPlay = "gPlay", gVolume = "gVolume", gSection = "gSection",
+                          gFeel = "gFeel", gIdiom = "gIdiom", gSound = "gSound", gExpr = "gExpr";
 }
 
 /** What the MIDI output plays during host playback. */
@@ -213,7 +214,7 @@ private:
     uint32_t lastGenUndoPush = 0;
 
     // ----- generator playback (audio thread reads)
-    struct RtGen { double beat, len; int pitch, vel, layer; };
+    struct RtGen { double beat, len; int pitch, vel, layer; float scoop, slide, vib; bool fall; };
     juce::SpinLock genLock;
     std::vector<RtGen> rtGen;
     double rtGenBeats = 32;

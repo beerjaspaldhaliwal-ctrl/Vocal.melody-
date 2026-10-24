@@ -225,6 +225,80 @@ int main()
                     for (auto& n : p.layers[ml::gen::Bass]) CHECK(n.pitch < 60, tag + ": bass register");
                 }
     });
+    test("generator: phrase library is well formed", [] {
+        CHECK(ml::gen::phraseLibraryErrors() == 0, "library entries with mismatched rhythm and contour");
+    });
+    test("generator: every genre x section x phrase source", [] {
+        double score = 0;
+        int n = 0;
+        for (int st = 0; st < ml::gen::NumStyles; ++st)
+            for (int sec = 0; sec < ml::gen::NumSections; ++sec)
+                for (double idiom : { 0.0, 1.0 })
+                    for (uint32_t seed = 1; seed <= 3; ++seed)
+                    {
+                        ml::gen::Settings s; s.style = st; s.section = sec; s.idiom = idiom;
+                        ml::gen::Seeds sd; sd.chords = seed; sd.rhythm = seed * 5 + sec; sd.pitch = seed * 11;
+                        auto p = ml::gen::generate(s, sd);
+                        const std::string tag = std::string(ml::gen::styleName(st)) + " / " + ml::gen::sectionName(sec);
+                        CHECK(p.layers[0].size() >= 6, tag + ": hook too short");
+                        const auto& mel = p.layers[0];
+                        for (size_t i = 0; i + 1 < mel.size(); ++i)
+                            CHECK(mel[i].beat + mel[i].len <= mel[i + 1].beat + 1e-6, tag + ": overlap");
+                        score += p.hookScore;
+                        ++n;
+                    }
+        std::printf("     (%d hooks, mean hook score %.1f / 10)\n", n, score / n);
+        CHECK(score / n > 7.0, "mean hook score");
+    });
+    test("generator: chorus sits higher than the verse", [] {
+        int higher = 0, total = 0;
+        for (int st = 0; st < ml::gen::NumStyles; ++st)
+            for (uint32_t seed = 1; seed <= 4; ++seed)
+            {
+                auto mean = [&](int sec) {
+                    ml::gen::Settings s; s.style = st; s.section = sec; s.ornaments = 0;
+                    ml::gen::Seeds sd; sd.chords = seed; sd.rhythm = seed; sd.pitch = seed;
+                    auto p = ml::gen::generate(s, sd);
+                    double m = 0;
+                    for (auto& x : p.layers[0]) m += x.pitch;
+                    return m / p.layers[0].size();
+                };
+                if (mean(ml::gen::Chorus) > mean(ml::gen::Verse)) ++higher;
+                ++total;
+            }
+        CHECK(higher >= total * 0.85, std::to_string(higher) + " of " + std::to_string(total));
+    });
+    test("generator: post-chorus hook says one bar twice", [] {
+        for (double idiom : { 0.0, 1.0 })
+        {
+            ml::gen::Settings s; s.style = ml::gen::DancePop; s.section = ml::gen::PostHook; s.idiom = idiom;
+            s.ornaments = 0; s.humanize = 0; s.feel = 0;
+            auto p = ml::gen::generate(s, {});
+            std::vector<double> a, b;
+            for (auto& n : p.layers[0]) { if (n.beat < 4) a.push_back(n.beat); else if (n.beat < 8) b.push_back(n.beat - 4); }
+            CHECK(a.size() == b.size() && !a.empty(), "bar sizes");
+            for (size_t i = 0; i < a.size(); ++i) CHECK(std::fabs(a[i] - b[i]) < 1e-6, "bar 2 should restate bar 1");
+        }
+    });
+    test("generator: vocal feel adds sung expression", [] {
+        ml::gen::Settings s; s.style = ml::gen::BollywoodRomantic; s.feel = 1.0;
+        auto p = ml::gen::generate(s, {});
+        int expressive = 0;
+        for (auto& n : p.layers[0]) if (n.vib > 0 || n.scoop != 0 || n.slide != 0 || n.fall) ++expressive;
+        CHECK(expressive >= 3, "expressive notes: " + std::to_string(expressive));
+        std::vector<ml::gen::MidiTrack> tr { { "Melody", p.layers[0], 0, true, 2 } };
+        auto bytes = ml::gen::writeMidiTracks(tr, 90);
+        int bends = 0;
+        for (size_t i = 0; i + 2 < bytes.size(); ++i) if (bytes[i] == 0xE0 && bytes[i + 2] < 128) ++bends;
+        CHECK(bends > 10, "pitch bends in the MIDI file: " + std::to_string(bends));
+        s.feel = 0;
+        auto plain = ml::gen::generate(s, {});
+        for (auto& n : plain.layers[0]) CHECK(n.vib == 0 && n.scoop == 0 && n.slide == 0 && !n.fall, "feel 0 should be dry");
+        // the curve starts below the note for a scoop and returns to centre
+        ml::gen::GNote g; g.beat = 1; g.len = 1; g.scoop = -1;
+        auto c = ml::gen::expressionCurve(g, 120);
+        CHECK(!c.empty() && c.front().second < -0.9 && std::fabs(c.back().second) < 1e-9, "scoop curve");
+    });
     test("generator: deterministic for the same seeds", [] {
         ml::gen::Settings s; s.style = ml::gen::PunjabiPop;
         ml::gen::Seeds sd; sd.pitch = 99;

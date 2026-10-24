@@ -281,6 +281,33 @@ void PianoRoll::paint(juce::Graphics& g)
                 g.setColour(theme::fg);
                 g.drawRoundedRectangle(r, (float) std::min(3.0, rowH / 4), 2.0f);
             }
+            if (mode == Mode::Generator && (n.vib > 0 || n.scoop != 0 || n.slide != 0 || n.fall))
+            {
+                // sung expression: scoop / slide hook at the start, vibrato wave, fall at the end
+                juce::Path e;
+                const float midY = r.getCentreY();
+                const float bend = (float) std::max(std::abs(n.scoop), std::abs(n.slide));
+                if (bend > 0)
+                {
+                    const float dir = (n.slide > 0) ? -1.0f : 1.0f; // slide from above draws downward
+                    e.startNewSubPath(r.getX() - 6, midY + dir * (float) rowH * 0.6f * bend);
+                    e.quadraticTo(r.getX() - 1, midY, r.getX() + 6, midY);
+                }
+                if (n.vib > 0 && r.getWidth() > 24)
+                {
+                    const float x0 = r.getX() + r.getWidth() * 0.35f, x1 = r.getRight() - 3;
+                    e.startNewSubPath(x0, midY);
+                    for (float x = x0; x <= x1; x += 2.0f)
+                        e.lineTo(x, midY + std::sin((x - x0) * 0.6f) * (float) rowH * 0.22f);
+                }
+                if (n.fall)
+                {
+                    e.startNewSubPath(r.getRight() - 6, midY);
+                    e.quadraticTo(r.getRight(), midY, r.getRight() + 5, midY + (float) rowH * 0.9f);
+                }
+                g.setColour(theme::fg.withAlpha(0.8f));
+                g.strokePath(e, juce::PathStrokeType(1.2f));
+            }
             if (r.getWidth() > 30 && rowH >= 11)
             {
                 g.setColour(theme::noteText);

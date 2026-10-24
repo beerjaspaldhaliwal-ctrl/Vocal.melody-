@@ -41,6 +41,9 @@ struct Note
     int vel = 96;
     double srcStart = 0; // detection start time, before quantize/moves
     int srcA = -1, srcB = -1; // analysis frame range (-1 = drawn by hand)
+    // sung expression for generated melodies (semitones); 0 = none
+    float scoop = 0, slide = 0, vib = 0;
+    bool fall = false;
 };
 
 struct TranscribeParams
@@ -80,7 +83,7 @@ struct Transcription
 enum Scale
 {
     Major = 0, Minor, HarmonicMinor, Dorian, Mixolydian, PentatonicMajor, PentatonicMinor, Phrygian,
-    PhrygianDominant, NumScales
+    PhrygianDominant, Lydian, Bhairav, NumScales
 };
 
 /** Semitone steps of a scale, relative to its tonic. */

@@ -17,28 +17,63 @@ It installs as two plugins from the same code:
 
 ## The generator
 
-Pick a **Genre**, a **Key** and a **Length**, then press **Generate**.
+Pick a **Genre**, a **Song section**, a **Key** and a **Length**, then press
+**Generate**.
 
-| Genre | What it writes |
+| Scene | Genres | What they write |
+| --- | --- | --- |
+| Hollywood / Western Pop | Pop Hit, Synth-Pop, Dance Pop / EDM, Emotional Ballad | Radio-pop progressions, arching hooks with a repeated motif, anthem choruses, 80s plucks, piano ballads |
+| R&B | 90s R&B, Neo-Soul, Alt R&B, Trap-Soul | 7th and 9th chords (ii–V–I, IVmaj7–iii7), laid-back timing, melisma runs, blue notes, falling tails, slides |
+| Hip-Hop | Melodic Rap, Trap Melody, Desi / UK Drill | Narrow repeated-note flows, triplets, 808s, dark minor with the major V |
+| Punjabi | Punjabi Pop, Punjabi Romantic | Harmonic or natural minor, high-starting hooks, murki turns, meend slides, tumbi riffs, bhangra bass |
+| Bollywood | Bollywood Romantic, Bollywood Dance, Sufi Pop | Long rising lines with meend and gamak-style vibrato, raga-flavoured scales, dhol-driven dance hooks, Sufi high openings and runs |
+| Afro | Afrobeats | Bouncy 3-3-2 syncopation, marimba riffs, off-beat skanks |
+
+**Scale / raga** offers the western modes plus Yaman (Lydian), Kafi
+(Dorian), Khamaj (Mixolydian), Bhairavi (Phrygian) and Bhairav.
+
+**Song section** shapes the hook the way a topliner would:
+
+| Section | Effect |
 | --- | --- |
-| Pop Hit | Radio-pop progressions (I–V–vi–IV family), arching hooks with a repeated motif, 8th-note bass |
-| Melodic Rap / R&B | Minor keys with 7th and 9th chords, narrow falling flows with repeated notes and triplets, 808 bass, bell riffs |
-| Punjabi Pop | Harmonic minor with the raised 7th, high-starting hooks with murki turns and grace notes, bhangra-style bass, tumbi riffs |
-| Desi / UK Drill | Dark minor progressions with the major V, sparse falling hooks, sliding 808 rhythms, answer phrases |
-| Afrobeats | Bouncy syncopated hooks, 3-3-2 rhythms, marimba-style riffs, off-beat chord skanks |
-| Dance Pop / EDM | Anthem progressions, busy plucky hooks, off-beat bass and stabs, 16th arps |
-| Emotional Ballad | Wider rising melodies, 7th chords, broken-chord piano, walking bass |
-| Trap Melody | Minor loops, triplet flows, 808s, bell riffs |
+| Verse | Lower, more conversational, more notes, less repetition |
+| Pre-Chorus | A rising line that builds toward the chorus |
+| Chorus | Higher and wider, longer notes, strongest repetition |
+| Post-Chorus Hook | One catchy bar, said twice |
 
-The genres capture each style's musical traits (scales, rhythms, chord
-habits, ornaments). They do not copy any artist's songs.
+The genres capture each style's musical language (scales, phrase shapes,
+rhythms, chord habits, ornaments, timing). They do not copy songs. The
+phrase library is a set of generic phrase shapes written for this plugin,
+and every hook is newly composed over your chords.
+
+### Vocal feel (humanized, sung-sounding melodies)
+
+**Vocal feel** turns a MIDI line into something that phrases like a singer:
+
+- **Scoops** up into notes and **meend** slides between connected notes
+  (strongest in Bollywood, Punjabi and Sufi)
+- **Vibrato** that starts after the note settles, wider for Bollywood
+  (gamak-like)
+- **Falls** off phrase ends (R&B, rap)
+- **R&B runs** (melisma), **blue-note** slides, **murki** turns (via Ornaments)
+- **Pocket**: R&B and Neo-Soul sit slightly behind the beat, Afrobeats a
+  touch ahead
+- **Dynamics** that swell toward each phrase's peak and ease off at the end
+
+The piano roll shows these on the melody notes (a hook for a scoop or slide,
+a wave for vibrato, a tail for a fall). With **Export vocal expression** on,
+they go into the MIDI file as pitch bends (bend range ±2), so a vocal
+synth, sampler or lead plays them back. **Melody sound** switches the
+preview between a lead synth and an "aah" vocal voice.
 
 ### How it writes a hook
 
 1. Choose a proven chord progression for the genre and key, voiced with smooth
    voice leading.
-2. Write a two-bar rhythmic motif from the genre's rhythm vocabulary (density,
-   syncopation and triplets set by your controls).
+2. Write a two-bar motif: either a phrase shape from the genre's phrase
+   library (how often is set by **Genre phrases**) or a rhythm built from the
+   genre's rhythm vocabulary (density, syncopation and triplets set by your
+   controls).
 3. Build the phrase plan: motif, answer, motif, resolution (call and
    response). Repeats re-fit the motif to the new chords.
 4. Choose every note by scoring candidates: chord tones on strong beats,
@@ -47,7 +82,9 @@ habits, ornaments). They do not copy any artist's songs.
 5. Write 24 complete hooks and keep the one with the best hook score
    (chord fit, singability, range, a single peak, resolution). The score is
    shown in the status bar.
-6. Add genre ornaments (grace notes, murki turns, falls) and humanize.
+6. Add genre ornaments (runs, blue notes, murki turns, grace notes), then
+   the vocal feel (scoops, slides, vibrato, falls, pocket, dynamics) and
+   humanize.
 
 ### Controls
 
@@ -58,9 +95,12 @@ habits, ornaments). They do not copy any artist's songs.
 | Variation | Same rhythm, new notes: a related version of the hook |
 | New chords | New progression; the hook re-fits to it |
 | Catchiness | How strongly the hook repeats its motif |
+| Genre phrases | How often the hook grows from the genre's phrase library instead of a fresh rhythm |
+| Song section | Verse, Pre-Chorus, Chorus or Post-Chorus Hook |
+| Vocal feel | Scoops, slides, vibrato, falls, pocket and dynamics |
 | Density / Syncopation | Fewer, longer notes ↔ busy flows; on the beat ↔ off-beat bounce |
 | Variation (slider) | How much the repeats change |
-| Ornaments | Grace notes, turns, falls (strongest in Punjabi Pop) |
+| Ornaments | Runs, blue notes, murki, grace notes, falls |
 | Range / Register | How wide and how high the hook sits |
 | Humanize / Swing | Velocity and timing feel |
 | Use my vocal's key | Takes the key detected from your captured vocal |

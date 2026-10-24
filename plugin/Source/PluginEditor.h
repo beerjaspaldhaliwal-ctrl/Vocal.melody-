@@ -63,6 +63,7 @@ private:
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> sliderAtt;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>> comboAtt;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> buttonAtt;
+    std::vector<std::unique_ptr<juce::ParameterAttachment>> customAtt;
     std::map<juce::String, juce::Component*> byId;
     std::vector<std::pair<int, juce::String>> headerPos;
     int contentHeight = 0;

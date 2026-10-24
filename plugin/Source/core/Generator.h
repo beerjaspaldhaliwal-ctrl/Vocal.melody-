@@ -12,10 +12,21 @@
 namespace ml::gen
 {
 
-enum Style { Pop = 0, MelodicRap, PunjabiPop, Drill, Afrobeats, DancePop, Ballad, Trap, NumStyles };
+enum Style
+{
+    Pop = 0, MelodicRap, PunjabiPop, Drill, Afrobeats, DancePop, Ballad, Trap,
+    NinetiesRnB, NeoSoul, AltRnB, TrapSoul, BollywoodRomantic, BollywoodDance, SufiPop, PunjabiRomantic, SynthPop,
+    NumStyles
+};
+enum Section { Verse = 0, PreChorus, Chorus, PostHook, NumSections };
 enum Layer { Melody = 0, Chords, Bass, Counter, NumLayers };
 
 const char* styleName(int style);
+const char* sectionName(int section);
+/** Genre families for menus: returns the group index of a style and the group names. */
+int styleGroup(int style);
+const char* styleGroupName(int group);
+constexpr int kNumStyleGroups = 6;
 const char* layerName(int layer);
 int defaultScale(int style);
 
@@ -34,6 +45,9 @@ struct Settings
     int octave = 0; // -1, 0, +1
     double humanize = 0.2;
     double swing = 0.0;
+    int section = Chorus;
+    double feel = 0.6;  // sung expression: scoops, slides, vibrato, laid-back timing, dynamics
+    double idiom = 0.5; // how often hooks grow from the genre phrase library
 };
 
 /** One seed per independently re-rollable part. */
@@ -47,6 +61,10 @@ struct GNote
     double beat = 0, len = 0.5;
     int pitch = 60;
     int vel = 96;
+    // sung expression in semitones: scoop from below, slide from the previous
+    // pitch (meend), vibrato depth, fall off the end
+    float scoop = 0, slide = 0, vib = 0;
+    bool fall = false;
 };
 
 struct Chord
@@ -86,6 +104,12 @@ Pattern buildAround(const std::vector<GNote>& melody, double beats, const Settin
 /** Best-fitting chord per bar for a melody (Viterbi over diatonic chords). */
 std::vector<Chord> harmonize(const std::vector<GNote>& melody, double beats, int tonic, int scale, int style);
 
+/** Pitch-bend curve (beat, semitones) that performs a note's expression. */
+std::vector<std::pair<double, double>> expressionCurve(const GNote& n, double bpm);
+
+/** Number of phrase-library entries whose rhythm and pitch lists disagree (for tests). */
+int phraseLibraryErrors();
+
 HookStats analyseHook(const std::vector<GNote>& melody, const std::vector<Chord>& chords, int tonic, int scale, int style);
 
 /** Multi-track (type 1) MIDI file, one track per layer. */
@@ -94,6 +118,8 @@ struct MidiTrack
     std::string name;
     std::vector<GNote> notes;
     int channel = 0;
+    bool expression = false; // write pitch bends for scoops, slides, vibrato
+    int bendRange = 2;
 };
 std::vector<uint8_t> writeMidiTracks(const std::vector<MidiTrack>& tracks, double bpm, int ppq = 480);
 

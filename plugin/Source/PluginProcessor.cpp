@@ -46,7 +46,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MelodyLiftProcessor::createL
     p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::keyTonic, 1 }, "Key", tonicChoices(), 0));
     p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::scale, 1 }, "Scale",
         StringArray { "Major", "Minor", "Harmonic minor", "Dorian", "Mixolydian", "Major pentatonic", "Minor pentatonic",
-                      "Phrygian", "Phrygian dominant" }, 0));
+                      "Phrygian", "Phrygian dominant", "Lydian (Yaman)", "Bhairav" }, 0));
     p.push_back(std::make_unique<AudioParameterBool>(ParameterID { ids::snap, 1 }, "Snap to scale", false));
     p.push_back(std::make_unique<AudioParameterInt>(ParameterID { ids::transpose, 1 }, "Transpose", -24, 24, 0,
                                                     AudioParameterIntAttributes().withLabel("st")));
@@ -74,8 +74,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout MelodyLiftProcessor::createL
     p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::gStyle, 1 }, "Style", styles, 0));
     p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::gKey, 1 }, "Key", keys, 0));
     p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::gScale, 1 }, "Scale",
-        StringArray { "Style default", "Major", "Minor", "Harmonic minor", "Dorian", "Mixolydian", "Major pentatonic",
-                      "Minor pentatonic", "Phrygian", "Phrygian dominant" }, 0));
+        StringArray { "Style default", "Major", "Minor", "Harmonic minor", "Dorian (Kafi)", "Mixolydian (Khamaj)",
+                      "Major pentatonic", "Minor pentatonic", "Phrygian (Bhairavi)", "Phrygian dominant",
+                      "Lydian (Yaman)", "Bhairav" }, 0));
     p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::gBars, 1 }, "Length", StringArray { "4 bars", "8 bars", "16 bars" }, 1));
     p.push_back(amount(ids::gDensity, "Density", 50));
     p.push_back(amount(ids::gSyncop, "Syncopation", 50));
@@ -88,6 +89,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout MelodyLiftProcessor::createL
     p.push_back(amount(ids::gSwing, "Swing", 0));
     p.push_back(std::make_unique<AudioParameterBool>(ParameterID { ids::gPlay, 1 }, "Play pattern with the song", kInstrumentBuild));
     p.push_back(amount(ids::gVolume, "Preview volume", 70));
+    p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::gSection, 1 }, "Song section",
+        StringArray { "Verse", "Pre-Chorus", "Chorus", "Post-Chorus Hook" }, 2));
+    p.push_back(amount(ids::gFeel, "Vocal feel", 60));
+    p.push_back(amount(ids::gIdiom, "Genre phrases", 50));
+    p.push_back(std::make_unique<AudioParameterChoice>(ParameterID { ids::gSound, 1 }, "Melody sound",
+        StringArray { "Lead synth", "Vocal (aah)" }, 1));
+    p.push_back(std::make_unique<AudioParameterBool>(ParameterID { ids::gExpr, 1 }, "Export vocal expression", true));
     return { p.begin(), p.end() };
 }
 
@@ -317,7 +325,18 @@ void MelodyLiftProcessor::renderPattern(juce::AudioBuffer<float>& buffer, juce::
                     if (t < beat0 - 1e-9) continue;
                     const int off = juce::jlimit(0, n - 1, (int) ((t - beat0) / bps));
                     const auto lenSamples = (int64_t) std::max(1.0, g.len / bps);
-                    if (audible) synth.noteOn(g.layer, g.pitch, g.vel, lenSamples, off);
+                    if (audible)
+                    {
+                        PreviewSynth::Expression ex;
+                        const double spb = 1.0 / (bps * sr); // seconds per beat
+                        ex.scoop = g.slide != 0 ? g.slide : g.scoop;
+                        ex.glideSec = (float) ((g.slide != 0 ? std::min(0.2, g.len * 0.35) : std::min(0.12, g.len * 0.3)) * spb);
+                        ex.vib = g.vib;
+                        ex.vibOnsetSec = (float) (g.len * 0.35 * spb);
+                        ex.fall = g.fall;
+                        ex.fallSec = (float) (std::min(0.25, g.len * 0.3) * spb);
+                        synth.noteOn(g.layer, g.pitch, g.vel, lenSamples, off, ex);
+                    }
                     if (midiActive)
                     {
                         const int ch = g.layer + 1;
@@ -344,6 +363,7 @@ void MelodyLiftProcessor::renderPattern(juce::AudioBuffer<float>& buffer, juce::
 
     if (audible)
     {
+        synth.setMelodyTimbre((int) param(ids::gSound));
         genSounding.store(true);
         const float gain = param(ids::gVolume) / 100.0f;
         const int chunk = synthBuf.getNumSamples();
@@ -653,7 +673,7 @@ void MelodyLiftProcessor::parameterChanged(const juce::String& id, float)
     if (restoring) return;
     static const juce::StringArray genIds { ids::gStyle, ids::gKey, ids::gScale, ids::gBars, ids::gDensity, ids::gSyncop,
                                             ids::gRepeat, ids::gComplex, ids::gOrnament, ids::gRange, ids::gOctave,
-                                            ids::gHumanize, ids::gSwing };
+                                            ids::gHumanize, ids::gSwing, ids::gSection, ids::gFeel, ids::gIdiom };
     if (genIds.contains(id))
     {
         if (!suppressGen)
@@ -860,6 +880,10 @@ void MelodyLiftProcessor::getStateInformation(juce::MemoryBlock& destData)
                 c.setProperty("s", n.start, nullptr);
                 c.setProperty("e", n.end, nullptr);
                 c.setProperty("v", n.vel, nullptr);
+                if (n.scoop != 0) c.setProperty("sc", n.scoop, nullptr);
+                if (n.slide != 0) c.setProperty("sl", n.slide, nullptr);
+                if (n.vib != 0) c.setProperty("vb", n.vib, nullptr);
+                if (n.fall) c.setProperty("fl", true, nullptr);
                 lt.appendChild(c, nullptr);
             }
             g.appendChild(lt, nullptr);
@@ -952,6 +976,10 @@ void MelodyLiftProcessor::setStateInformation(const void* data, int sizeInBytes)
                 n.start = n.srcStart = c.getProperty("s", 0.0);
                 n.end = c.getProperty("e", 0.0);
                 n.vel = c.getProperty("v", 96);
+                n.scoop = (float) (double) c.getProperty("sc", 0.0);
+                n.slide = (float) (double) c.getProperty("sl", 0.0);
+                n.vib = (float) (double) c.getProperty("vb", 0.0);
+                n.fall = (bool) c.getProperty("fl", false);
                 out.push_back(n);
                 any = true;
             }
@@ -992,6 +1020,9 @@ ml::gen::Settings MelodyLiftProcessor::genSettings() const
     g.octave = (int) param(ids::gOctave) - 1;
     g.humanize = param(ids::gHumanize) / 100.0;
     g.swing = param(ids::gSwing) / 100.0;
+    g.section = (int) param(ids::gSection);
+    g.feel = param(ids::gFeel) / 100.0;
+    g.idiom = param(ids::gIdiom) / 100.0;
     return g;
 }
 
@@ -1051,6 +1082,10 @@ void MelodyLiftProcessor::patternToNotes()
             n.start = n.srcStart = g.beat * spb;
             n.end = (g.beat + g.len) * spb;
             n.vel = g.vel;
+            n.scoop = g.scoop;
+            n.slide = g.slide;
+            n.vib = g.vib;
+            n.fall = g.fall;
             out.push_back(n);
         }
     }
@@ -1062,7 +1097,8 @@ void MelodyLiftProcessor::publishPattern()
     const double bps = genBpm / 60.0;
     for (int l = 0; l < ml::gen::NumLayers; ++l)
         for (const auto& n : genNotes[(size_t) l])
-            rt.push_back({ n.start * bps, (n.end - n.start) * bps, juce::jlimit(0, 127, n.pitch), juce::jlimit(1, 127, n.vel), l });
+            rt.push_back({ n.start * bps, (n.end - n.start) * bps, juce::jlimit(0, 127, n.pitch), juce::jlimit(1, 127, n.vel), l,
+                           n.scoop, n.slide, n.vib, n.fall });
     std::sort(rt.begin(), rt.end(), [](const RtGen& a, const RtGen& b) { return a.beat < b.beat; });
     const juce::SpinLock::ScopedLockType lock(genLock);
     rtGen.swap(rt);
@@ -1206,8 +1242,16 @@ std::vector<uint8_t> MelodyLiftProcessor::buildPatternMidi(int layer) const
         ml::gen::MidiTrack t;
         t.name = ml::gen::layerName(l);
         t.channel = l;
+        t.expression = l == ml::gen::Melody && param(ids::gExpr) > 0.5f;
         for (const auto& n : genNotes[(size_t) l])
-            t.notes.push_back({ n.start * bps, (n.end - n.start) * bps, n.pitch, n.vel });
+        {
+            ml::gen::GNote g { n.start * bps, (n.end - n.start) * bps, n.pitch, n.vel };
+            g.scoop = n.scoop;
+            g.slide = n.slide;
+            g.vib = n.vib;
+            g.fall = n.fall;
+            t.notes.push_back(g);
+        }
         tracks.push_back(t);
     }
     return ml::gen::writeMidiTracks(tracks, genBpm);

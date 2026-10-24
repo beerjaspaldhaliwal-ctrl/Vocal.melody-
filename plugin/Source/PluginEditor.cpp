@@ -51,21 +51,26 @@ ControlsPanel::ControlsPanel(MelodyLiftProcessor& p, Kind kind) : proc(p)
     {
         header("Style");
         combo(ids::gStyle, "Genre");
+        combo(ids::gSection, "Song section");
         combo(ids::gKey, "Key");
-        combo(ids::gScale, "Scale");
+        combo(ids::gScale, "Scale / raga");
         combo(ids::gBars, "Length");
         button("Use my vocal's key", [this] { proc.useVocalKey(); });
         header("Hook");
         slider(ids::gRepeat, "Catchiness", "How strongly the hook repeats its motif");
+        slider(ids::gIdiom, "Genre phrases", "Start hooks from the genre's phrase shapes");
         slider(ids::gDensity, "Density", "Fewer, longer notes  <->  busy flows");
         slider(ids::gSyncop, "Syncopation", "On the beat  <->  off-beat bounce");
         slider(ids::gComplex, "Variation", "How much repeats change");
-        slider(ids::gOrnament, "Ornaments", "Grace notes, murki turns, falls");
+        slider(ids::gOrnament, "Ornaments", "Runs, murki, gamak, grace notes");
         combo(ids::gRange, "Range");
         combo(ids::gOctave, "Register");
-        header("Feel");
+        header("Vocal feel");
+        slider(ids::gFeel, "Vocal feel", "Scoops, meend slides, vibrato, pocket");
         slider(ids::gHumanize, "Humanize");
         slider(ids::gSwing, "Swing");
+        combo(ids::gSound, "Melody sound");
+        toggle(ids::gExpr, "Export vocal expression (pitch bends)");
         header("Playback");
         if (!kInstrumentBuild) toggle(ids::gPlay, "Play pattern with the song");
         slider(ids::gVolume, "Preview volume");
@@ -136,9 +141,30 @@ void ControlsPanel::combo(const juce::String& id, const juce::String& label)
     r.label = std::make_unique<juce::Label>(juce::String(), label);
     r.label->setFont(juce::FontOptions(13.0f));
     auto c = std::make_unique<juce::ComboBox>();
-    if (auto* choice = dynamic_cast<juce::AudioParameterChoice*>(proc.apvts.getParameter(id)))
-        c->addItemList(choice->choices, 1);
-    comboAtt.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(proc.apvts, id, *c));
+    if (id == ids::gStyle)
+    {
+        // genres grouped by scene; item IDs are style index + 1
+        for (int g = 0; g < ml::gen::kNumStyleGroups; ++g)
+        {
+            c->addSectionHeading(ml::gen::styleGroupName(g));
+            for (int st = 0; st < ml::gen::NumStyles; ++st)
+                if (ml::gen::styleGroup(st) == g) c->addItem(ml::gen::styleName(st), st + 1);
+        }
+        auto* box = c.get();
+        auto att = std::make_unique<juce::ParameterAttachment>(*proc.apvts.getParameter(id), [box](float v) {
+            box->setSelectedId(juce::roundToInt(v) + 1, juce::dontSendNotification);
+        });
+        auto* a = att.get();
+        box->onChange = [box, a] { if (box->getSelectedId() > 0) a->setValueAsCompleteGesture((float) (box->getSelectedId() - 1)); };
+        att->sendInitialUpdate();
+        customAtt.push_back(std::move(att));
+    }
+    else
+    {
+        if (auto* choice = dynamic_cast<juce::AudioParameterChoice*>(proc.apvts.getParameter(id)))
+            c->addItemList(choice->choices, 1);
+        comboAtt.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(proc.apvts, id, *c));
+    }
     addAndMakeVisible(*r.label);
     addAndMakeVisible(*c);
     byId[id] = c.get();
